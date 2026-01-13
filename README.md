@@ -269,28 +269,107 @@ X-IVT-Score: 50
 X-IVT-Signals: 1
 ```
 
-### Publisher Authentication
+### Publisher Management
 
-Domain-based access control for auction requests.
+Domain-based access control for auction requests with multiple configuration methods.
 
 **Features:**
 - Per-publisher domain whitelisting
 - Wildcard subdomain support (*.example.com)
 - Rate limiting per publisher (100 RPS default)
-- Redis-based publisher registry
+- Redis-based dynamic updates (no restart required)
+- REST API for programmatic management
+- CLI management script included
 
-**Register Publishers Programmatically:**
-```go
-import "github.com/thenexusengine/tne_springwire/internal/middleware"
+**Method 1: Management Script** (Easiest)
+```bash
+cd deployment
 
-pubAuth := middleware.NewPublisherAuth(nil)
+# List all publishers
+./manage-publishers.sh list
 
-// Register publisher with allowed domains
-pubAuth.RegisterPublisher("pub-123", "example.com|*.example.com")
+# Add new publisher
+./manage-publishers.sh add pub123 "example.com|*.example.com"
 
-// Or use Redis
-redis.HSet(ctx, "tne_catalyst:publishers", "pub-123", "example.com")
+# Check specific publisher
+./manage-publishers.sh check pub123
+
+# Update domains
+./manage-publishers.sh update pub123 "newdomain.com"
+
+# Remove publisher
+./manage-publishers.sh remove pub123
 ```
+
+**Method 2: REST API** (For UX Integration)
+```bash
+# List all publishers
+curl https://catalyst.springwire.ai/admin/publishers
+
+# Get specific publisher
+curl https://catalyst.springwire.ai/admin/publishers/pub123
+
+# Create publisher
+curl -X POST https://catalyst.springwire.ai/admin/publishers \
+  -H "Content-Type: application/json" \
+  -d '{"id":"pub123","allowed_domains":"example.com|*.example.com"}'
+
+# Update publisher
+curl -X PUT https://catalyst.springwire.ai/admin/publishers/pub123 \
+  -H "Content-Type: application/json" \
+  -d '{"allowed_domains":"newdomain.com"}'
+
+# Delete publisher
+curl -X DELETE https://catalyst.springwire.ai/admin/publishers/pub123
+```
+
+**Method 3: Environment Variables** (Static)
+```bash
+# In .env file (requires restart)
+REGISTERED_PUBLISHERS=pub123:example.com|*.example.com,pub456:another.com
+```
+
+**Response Format:**
+```json
+{
+  "publishers": [
+    {
+      "id": "pub123",
+      "allowed_domains": "example.com|*.example.com",
+      "domain_list": ["example.com", "*.example.com"]
+    }
+  ],
+  "count": 1
+}
+```
+
+**Building a UX:**
+
+The REST API is designed for integration with admin UIs. Example JavaScript:
+
+```javascript
+// Fetch all publishers
+async function fetchPublishers() {
+  const response = await fetch('/admin/publishers');
+  const data = await response.json();
+  return data.publishers;
+}
+
+// Add new publisher
+async function addPublisher(id, domains) {
+  const response = await fetch('/admin/publishers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: id,
+      allowed_domains: domains
+    })
+  });
+  return response.json();
+}
+```
+
+See **[PUBLISHER-CONFIG-GUIDE.md](PUBLISHER-CONFIG-GUIDE.md)** for complete documentation.
 
 ### Intelligent Demand Router (IDR) Integration
 

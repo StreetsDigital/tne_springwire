@@ -204,8 +204,11 @@ func main() {
 	// Live dashboard for monitoring
 	dashboardHandler := endpoints.NewDashboardHandler()
 	metricsAPIHandler := endpoints.NewMetricsAPIHandler()
+	publisherAdminHandler := endpoints.NewPublisherAdminHandler(redisClient)
 	mux.Handle("/admin/dashboard", dashboardHandler)
 	mux.Handle("/admin/metrics", metricsAPIHandler)
+	mux.Handle("/admin/publishers", publisherAdminHandler)
+	mux.Handle("/admin/publishers/", publisherAdminHandler) // With trailing slash for IDs
 
 	// Build middleware chain: CORS -> Security -> Logging -> Size Limit -> Auth -> PublisherAuth -> Rate Limit -> Metrics -> Gzip -> Handler
 	// Note: CORS must be outermost to handle preflight OPTIONS requests
