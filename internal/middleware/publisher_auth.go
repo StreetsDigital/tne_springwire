@@ -275,12 +275,16 @@ func (p *PublisherAuth) extractPublisherInfo(req *minimalBidRequest) (publisherI
 	return
 }
 
-// validatePublisher validates the publisher ID and domain against PostgreSQL
+// validatePublisher validates the publisher ID and domain
+// Checks in order: PostgreSQL database, Redis, in-memory RegisteredPubs
 func (p *PublisherAuth) validatePublisher(ctx context.Context, publisherID, domain string) error {
 	p.mu.RLock()
 	allowUnregistered := p.config.AllowUnregistered
 	validateDomain := p.config.ValidateDomain
 	publisherStore := p.publisherStore
+	useRedis := p.config.UseRedis
+	redisClient := p.redisClient
+	registeredPubs := p.config.RegisteredPubs
 	p.mu.RUnlock()
 
 	// No publisher ID
@@ -291,7 +295,7 @@ func (p *PublisherAuth) validatePublisher(ctx context.Context, publisherID, doma
 		return &PublisherAuthError{Code: "missing_publisher", Message: "publisher ID required"}
 	}
 
-	// Check PostgreSQL database (single source of truth)
+	// 1. Check PostgreSQL database (primary source of truth if configured)
 	if publisherStore != nil {
 		pub, err := publisherStore.GetByPublisherID(ctx, publisherID)
 		if err != nil {
@@ -338,7 +342,45 @@ func (p *PublisherAuth) validatePublisher(ctx context.Context, publisherID, doma
 		return nil
 	}
 
-	// No database configured - system misconfiguration
+	// 2. Check Redis (secondary source if configured)
+	if useRedis && redisClient != nil {
+		allowedDomains, err := redisClient.HGet(ctx, RedisPublishersHash, publisherID)
+		if err != nil {
+			// Redis error - log but continue to fallback
+			log.Warn().Err(err).Str("publisher_id", publisherID).Msg("Redis lookup failed, falling back")
+		} else if allowedDomains != "" {
+			// Publisher found in Redis
+			// Validate domain if required
+			if validateDomain && allowedDomains != "*" {
+				if !p.domainMatches(domain, allowedDomains) {
+					return &PublisherAuthError{Code: "domain_mismatch", Message: "domain not allowed for publisher"}
+				}
+			}
+			return nil
+		}
+		// Publisher not found in Redis, continue to fallback
+	}
+
+	// 3. Check in-memory RegisteredPubs (fallback for simple deployments and testing)
+	if len(registeredPubs) > 0 {
+		allowedDomains, exists := registeredPubs[publisherID]
+		if exists {
+			// Publisher found in memory
+			// Validate domain if required
+			if validateDomain && allowedDomains != "" && allowedDomains != "*" {
+				if !p.domainMatches(domain, allowedDomains) {
+					return &PublisherAuthError{Code: "domain_mismatch", Message: "domain not allowed for publisher"}
+				}
+			}
+			return nil
+		}
+		// Publisher not in RegisteredPubs - reject if we have publishers defined
+		if !allowUnregistered {
+			return &PublisherAuthError{Code: "unknown_publisher", Message: "publisher not registered"}
+		}
+	}
+
+	// No validation source configured
 	if allowUnregistered {
 		return nil
 	}
