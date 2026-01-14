@@ -204,9 +204,9 @@ func (d *IVTDetector) compilePatterns() {
 func (d *IVTDetector) Validate(ctx context.Context, r *http.Request, publisherID, domain string) *IVTResult {
 	startTime := time.Now()
 
+	// Snapshot entire config once to reduce lock contention
 	d.mu.RLock()
-	monitoringEnabled := d.config.MonitoringEnabled
-	blockingEnabled := d.config.BlockingEnabled
+	cfg := *d.config
 	d.mu.RUnlock()
 
 	result := &IVTResult{
@@ -220,19 +220,19 @@ func (d *IVTDetector) Validate(ctx context.Context, r *http.Request, publisherID
 	}
 
 	// Skip if monitoring disabled
-	if !monitoringEnabled {
+	if !cfg.MonitoringEnabled {
 		result.DetectionTime = time.Since(startTime)
 		return result
 	}
 
-	// Run all checks
-	d.checkUserAgent(r, result)
-	d.checkReferer(r, domain, result)
-	d.checkGeo(r, result)
+	// Run all checks with snapshotted config
+	d.checkUserAgentWithConfig(r, result, &cfg)
+	d.checkRefererWithConfig(r, domain, result, &cfg)
+	d.checkGeoWithConfig(r, result, &cfg)
 
 	// Calculate final score and decision
 	result.Score = d.calculateScore(result.Signals)
-	result.ShouldBlock = blockingEnabled && result.Score >= 70 // Block at 70+ score
+	result.ShouldBlock = cfg.BlockingEnabled && result.Score >= 70 // Block at 70+ score
 	result.IsValid = result.Score < 70 // Valid if score < 70
 
 	if result.ShouldBlock && len(result.Signals) > 0 {
@@ -247,13 +247,9 @@ func (d *IVTDetector) Validate(ctx context.Context, r *http.Request, publisherID
 	return result
 }
 
-// checkUserAgent validates user agent patterns
-func (d *IVTDetector) checkUserAgent(r *http.Request, result *IVTResult) {
-	d.mu.RLock()
-	enabled := d.config.CheckUserAgent
-	d.mu.RUnlock()
-
-	if !enabled {
+// checkUserAgentWithConfig validates user agent patterns using snapshotted config
+func (d *IVTDetector) checkUserAgentWithConfig(r *http.Request, result *IVTResult, cfg *IVTConfig) {
+	if !cfg.CheckUserAgent {
 		return
 	}
 
@@ -285,14 +281,17 @@ func (d *IVTDetector) checkUserAgent(r *http.Request, result *IVTResult) {
 	}
 }
 
-// checkReferer validates referer against domain
-func (d *IVTDetector) checkReferer(r *http.Request, domain string, result *IVTResult) {
+// checkUserAgent validates user agent patterns (legacy wrapper)
+func (d *IVTDetector) checkUserAgent(r *http.Request, result *IVTResult) {
 	d.mu.RLock()
-	enabled := d.config.CheckReferer
-	requireReferer := d.config.RequireReferer
+	cfg := *d.config
 	d.mu.RUnlock()
+	d.checkUserAgentWithConfig(r, result, &cfg)
+}
 
-	if !enabled {
+// checkRefererWithConfig validates referer against domain using snapshotted config
+func (d *IVTDetector) checkRefererWithConfig(r *http.Request, domain string, result *IVTResult, cfg *IVTConfig) {
+	if !cfg.CheckReferer {
 		return
 	}
 
@@ -300,7 +299,7 @@ func (d *IVTDetector) checkReferer(r *http.Request, domain string, result *IVTRe
 
 	// Missing referer check (if required)
 	if referer == "" {
-		if requireReferer {
+		if cfg.RequireReferer {
 			result.Signals = append(result.Signals, IVTSignal{
 				Type:        "invalid_referer",
 				Severity:    "medium",
@@ -326,29 +325,39 @@ func (d *IVTDetector) checkReferer(r *http.Request, domain string, result *IVTRe
 	}
 }
 
-// checkGeo validates geographic restrictions
-func (d *IVTDetector) checkGeo(r *http.Request, result *IVTResult) {
+// checkReferer validates referer against domain (legacy wrapper)
+func (d *IVTDetector) checkReferer(r *http.Request, domain string, result *IVTResult) {
 	d.mu.RLock()
-	enabled := d.config.CheckGeo
-	allowedCountries := d.config.AllowedCountries
-	blockedCountries := d.config.BlockedCountries
+	cfg := *d.config
 	d.mu.RUnlock()
+	d.checkRefererWithConfig(r, domain, result, &cfg)
+}
 
-	if !enabled {
+// checkGeoWithConfig validates geographic restrictions using snapshotted config
+func (d *IVTDetector) checkGeoWithConfig(r *http.Request, result *IVTResult, cfg *IVTConfig) {
+	if !cfg.CheckGeo {
 		return
 	}
 
 	// TODO: Implement GeoIP lookup
 	// This requires a GeoIP database (MaxMind, IP2Location, etc.)
 	// For now, this is a placeholder
-	_ = allowedCountries
-	_ = blockedCountries
+	_ = cfg.AllowedCountries
+	_ = cfg.BlockedCountries
 
 	// Example:
 	// country := geoip.Lookup(getClientIP(r))
-	// if len(allowedCountries) > 0 && !contains(allowedCountries, country) {
+	// if len(cfg.AllowedCountries) > 0 && !contains(cfg.AllowedCountries, country) {
 	//     result.Signals = append(result.Signals, IVTSignal{...})
 	// }
+}
+
+// checkGeo validates geographic restrictions (legacy wrapper)
+func (d *IVTDetector) checkGeo(r *http.Request, result *IVTResult) {
+	d.mu.RLock()
+	cfg := *d.config
+	d.mu.RUnlock()
+	d.checkGeoWithConfig(r, result, &cfg)
 }
 
 // calculateScore computes IVT score from signals

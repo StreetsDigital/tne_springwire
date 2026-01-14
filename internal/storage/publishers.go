@@ -31,6 +31,16 @@ func (p *Publisher) GetAllowedDomains() string {
 	return p.AllowedDomains
 }
 
+// GetBidMultiplier returns the bid multiplier (for exchange interface)
+func (p *Publisher) GetBidMultiplier() float64 {
+	return p.BidMultiplier
+}
+
+// GetPublisherID returns the publisher ID (for exchange interface)
+func (p *Publisher) GetPublisherID() string {
+	return p.PublisherID
+}
+
 // PublisherStore provides database operations for publishers
 type PublisherStore struct {
 	db *sql.DB
@@ -282,10 +292,10 @@ func NewDBConnection(host, port, user, password, dbname, sslmode string) (*sql.D
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Configure connection pool
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	// Configure connection pool for high-concurrency auction workload
+	db.SetMaxOpenConns(100)  // Increased for parallel bidder lookups
+	db.SetMaxIdleConns(25)   // Keep more idle connections ready
+	db.SetConnMaxLifetime(10 * time.Minute)
 
 	// Test connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

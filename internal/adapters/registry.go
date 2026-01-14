@@ -72,7 +72,7 @@ func (r *Registry) ListEnabledBidders() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	bidders := make([]string, 0)
+	bidders := make([]string, 0, len(r.adapters)) // Pre-allocate to avoid realloc on append
 	for code, awi := range r.adapters {
 		if awi.Info.Enabled {
 			bidders = append(bidders, code)

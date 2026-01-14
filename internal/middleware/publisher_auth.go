@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -225,9 +226,9 @@ func (p *PublisherAuth) Middleware(next http.Handler) http.Handler {
 			}
 
 			// Add IVT score to headers for monitoring (even if not blocking)
-			r.Header.Set("X-IVT-Score", string(rune(ivtResult.Score)))
+			r.Header.Set("X-IVT-Score", strconv.Itoa(ivtResult.Score))
 			if len(ivtResult.Signals) > 0 {
-				r.Header.Set("X-IVT-Signals", string(rune(len(ivtResult.Signals))))
+				r.Header.Set("X-IVT-Signals", strconv.Itoa(len(ivtResult.Signals)))
 			}
 		}
 
