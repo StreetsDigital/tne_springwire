@@ -720,3 +720,250 @@ func TestPrivacyMiddleware_NoAnonymizationWithoutGDPR(t *testing.T) {
 		t.Errorf("Expected original IP without GDPR, got %q", modifiedReq.Device.IP)
 	}
 }
+
+// GPP (Global Privacy Platform) Tests
+
+func TestPrivacyMiddleware_GPPNoString(t *testing.T) {
+	// Request without GPP string should pass through
+	config := DefaultPrivacyConfig()
+	config.EnforceGPP = true
+	mw := NewPrivacyMiddleware(config)
+
+	called := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := &openrtb.BidRequest{
+		ID:  "test-gpp-1",
+		Imp: []openrtb.Imp{{ID: "imp1", Banner: &openrtb.Banner{}}},
+		// No GPP string
+	}
+
+	body, _ := json.Marshal(req)
+	httpReq := httptest.NewRequest(http.MethodPost, "/openrtb2/auction", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, httpReq)
+
+	if !called {
+		t.Error("Handler should have been called when no GPP string present")
+	}
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+}
+
+func TestPrivacyMiddleware_GPPDisabled(t *testing.T) {
+	// When GPP enforcement is disabled, any GPP string should be ignored
+	config := DefaultPrivacyConfig()
+	config.EnforceGPP = false
+	mw := NewPrivacyMiddleware(config)
+
+	called := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := &openrtb.BidRequest{
+		ID:  "test-gpp-disabled",
+		Imp: []openrtb.Imp{{ID: "imp1", Banner: &openrtb.Banner{}}},
+		Regs: &openrtb.Regs{
+			GPP:    "invalid-gpp-string",
+			GPPSID: []int{7},
+		},
+	}
+
+	body, _ := json.Marshal(req)
+	httpReq := httptest.NewRequest(http.MethodPost, "/openrtb2/auction", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, httpReq)
+
+	if !called {
+		t.Error("Handler should have been called when GPP enforcement is disabled")
+	}
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+}
+
+func TestPrivacyMiddleware_GPPInvalidString_StrictMode(t *testing.T) {
+	// Invalid GPP string in strict mode should be rejected
+	config := DefaultPrivacyConfig()
+	config.EnforceGPP = true
+	config.StrictMode = true
+	mw := NewPrivacyMiddleware(config)
+
+	called := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := &openrtb.BidRequest{
+		ID:  "test-gpp-invalid-strict",
+		Imp: []openrtb.Imp{{ID: "imp1", Banner: &openrtb.Banner{}}},
+		Regs: &openrtb.Regs{
+			GPP:    "definitely-not-valid-gpp",
+			GPPSID: []int{7},
+		},
+	}
+
+	body, _ := json.Marshal(req)
+	httpReq := httptest.NewRequest(http.MethodPost, "/openrtb2/auction", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, httpReq)
+
+	if called {
+		t.Error("Handler should NOT have been called with invalid GPP string in strict mode")
+	}
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", rr.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp["regulation"] != "GPP" {
+		t.Errorf("Expected regulation=GPP, got %v", resp["regulation"])
+	}
+}
+
+func TestPrivacyMiddleware_GPPInvalidString_NonStrictMode(t *testing.T) {
+	// Invalid GPP string in non-strict mode should be allowed through
+	config := DefaultPrivacyConfig()
+	config.EnforceGPP = true
+	config.StrictMode = false
+	mw := NewPrivacyMiddleware(config)
+
+	called := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := &openrtb.BidRequest{
+		ID:  "test-gpp-invalid-nonstrict",
+		Imp: []openrtb.Imp{{ID: "imp1", Banner: &openrtb.Banner{}}},
+		Regs: &openrtb.Regs{
+			GPP:    "definitely-not-valid-gpp",
+			GPPSID: []int{7},
+		},
+	}
+
+	body, _ := json.Marshal(req)
+	httpReq := httptest.NewRequest(http.MethodPost, "/openrtb2/auction", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, httpReq)
+
+	if !called {
+		t.Error("Handler should have been called with invalid GPP string in non-strict mode")
+	}
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+}
+
+func TestCheckGPPBidderConsent_Empty(t *testing.T) {
+	// Empty GPP string should not block
+	blocked, _ := CheckGPPBidderConsent(nil)
+	if blocked {
+		t.Error("Expected not blocked for nil request")
+	}
+
+	req := &openrtb.BidRequest{
+		ID: "test",
+	}
+	blocked, _ = CheckGPPBidderConsent(req)
+	if blocked {
+		t.Error("Expected not blocked for request without regs")
+	}
+
+	req.Regs = &openrtb.Regs{}
+	blocked, _ = CheckGPPBidderConsent(req)
+	if blocked {
+		t.Error("Expected not blocked for request without GPP string")
+	}
+}
+
+func TestGetGPPApplicableRegulations(t *testing.T) {
+	// Test that applicable regulations are correctly identified
+
+	// Empty request
+	regs := GetGPPApplicableRegulations(nil)
+	if regs != nil {
+		t.Errorf("Expected nil for nil request, got %v", regs)
+	}
+
+	// Request with US National section
+	req := &openrtb.BidRequest{
+		Regs: &openrtb.Regs{
+			GPP:    "DBABBgA~BVoIgAAQ.QAAA",
+			GPPSID: []int{7}, // US National
+		},
+	}
+	regs = GetGPPApplicableRegulations(req)
+	if len(regs) != 1 || regs[0] != "US-National" {
+		t.Errorf("Expected [US-National], got %v", regs)
+	}
+
+	// Request with multiple sections
+	req.Regs.GPPSID = []int{7, 8} // US National + California
+	regs = GetGPPApplicableRegulations(req)
+	if len(regs) != 2 {
+		t.Errorf("Expected 2 regulations, got %v", regs)
+	}
+
+	// Request with GDPR section
+	req.Regs.GPPSID = []int{2} // TCF EU v2
+	regs = GetGPPApplicableRegulations(req)
+	if len(regs) != 1 || regs[0] != "GDPR" {
+		t.Errorf("Expected [GDPR], got %v", regs)
+	}
+}
+
+func TestGPPTakesPrecedenceOverUSPrivacy(t *testing.T) {
+	// When both GPP and USPrivacy are present, GPP should take precedence
+	// and USPrivacy should not be checked
+	config := DefaultPrivacyConfig()
+	config.EnforceGPP = true
+	config.EnforceCCPA = true
+	config.StrictMode = false // Don't fail on invalid GPP
+	mw := NewPrivacyMiddleware(config)
+
+	called := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// USPrivacy indicates opt-out (would block if checked)
+	// but GPP is present (and invalid, so passes in non-strict mode)
+	req := &openrtb.BidRequest{
+		ID:  "test-gpp-precedence",
+		Imp: []openrtb.Imp{{ID: "imp1", Banner: &openrtb.Banner{}}},
+		Regs: &openrtb.Regs{
+			GPP:       "some-gpp-string",
+			GPPSID:    []int{7},
+			USPrivacy: "1YYN", // This would block if GPP wasn't present
+		},
+	}
+
+	body, _ := json.Marshal(req)
+	httpReq := httptest.NewRequest(http.MethodPost, "/openrtb2/auction", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, httpReq)
+
+	// Should pass because GPP takes precedence and we're in non-strict mode
+	if !called {
+		t.Error("Handler should have been called - GPP takes precedence over USPrivacy")
+	}
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+}

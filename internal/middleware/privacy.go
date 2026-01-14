@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
+	"github.com/thenexusengine/tne_springwire/internal/privacy/gpp"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
 
@@ -103,6 +104,9 @@ type PrivacyConfig struct {
 	EnforceCOPPA bool
 	// EnforceCCPA blocks/strips data when user opts out
 	EnforceCCPA bool
+	// EnforceGPP enables GPP (Global Privacy Platform) enforcement
+	// When enabled, GPP strings are parsed and opt-out signals are enforced
+	EnforceGPP bool
 	// GeoEnforcement validates consent strings match user's geographic location
 	// When enabled, verifies EU users have GDPR consent, CA users have CCPA, etc.
 	GeoEnforcement bool
@@ -119,6 +123,7 @@ type PrivacyConfig struct {
 //   - PBS_ENFORCE_GDPR: "true" or "false" (default: true)
 //   - PBS_ENFORCE_COPPA: "true" or "false" (default: true)
 //   - PBS_ENFORCE_CCPA: "true" or "false" (default: true)
+//   - PBS_ENFORCE_GPP: "true" or "false" (default: true)
 //   - PBS_GEO_ENFORCEMENT: "true" or "false" (default: true)
 //   - PBS_PRIVACY_STRICT_MODE: "true" or "false" (default: true)
 //   - PBS_ANONYMIZE_IP: "true" or "false" (default: true)
@@ -127,6 +132,7 @@ func DefaultPrivacyConfig() PrivacyConfig {
 		EnforceGDPR:      getEnvBool("PBS_ENFORCE_GDPR", true),
 		EnforceCOPPA:     getEnvBool("PBS_ENFORCE_COPPA", true),
 		EnforceCCPA:      getEnvBool("PBS_ENFORCE_CCPA", true),
+		EnforceGPP:       getEnvBool("PBS_ENFORCE_GPP", true),
 		GeoEnforcement:   getEnvBool("PBS_GEO_ENFORCEMENT", true),
 		RequiredPurposes: RequiredPurposes,
 		StrictMode:       getEnvBool("PBS_PRIVACY_STRICT_MODE", true),
@@ -351,8 +357,17 @@ func (m *PrivacyMiddleware) checkPrivacyCompliance(req *openrtb.BidRequest) *Pri
 		}
 	}
 
+	// Check GPP (Global Privacy Platform) - unified privacy framework
+	if m.config.EnforceGPP && req.Regs != nil && req.Regs.GPP != "" {
+		violation := m.checkGPPCompliance(req)
+		if violation != nil {
+			return violation
+		}
+	}
+
 	// Check US Privacy (CCPA) - P0: Enforce opt-out
-	if req.Regs != nil && req.Regs.USPrivacy != "" {
+	// Note: If GPP is present, it takes precedence over legacy USPrivacy string
+	if req.Regs != nil && req.Regs.USPrivacy != "" && req.Regs.GPP == "" {
 		violation := m.checkCCPACompliance(req.ID, req.Regs.USPrivacy)
 		if violation != nil {
 			return violation
@@ -897,6 +912,109 @@ func (m *PrivacyMiddleware) checkCCPACompliance(requestID, usPrivacy string) *Pr
 	}
 
 	return nil
+}
+
+// checkGPPCompliance validates GPP (Global Privacy Platform) consent signals
+// GPP is the IAB's unified privacy framework that consolidates GDPR, CCPA, and state laws
+func (m *PrivacyMiddleware) checkGPPCompliance(req *openrtb.BidRequest) *PrivacyViolation {
+	if req.Regs == nil || req.Regs.GPP == "" {
+		return nil
+	}
+
+	// Parse the GPP string
+	parsedGPP, err := gpp.Parse(req.Regs.GPP)
+	if err != nil {
+		logger.Log.Debug().
+			Str("request_id", req.ID).
+			Err(err).
+			Msg("Failed to parse GPP string")
+
+		// In strict mode, reject invalid GPP strings
+		if m.config.StrictMode {
+			return &PrivacyViolation{
+				Regulation:  "GPP",
+				Reason:      "Invalid GPP string: " + err.Error(),
+				NoBidReason: openrtb.NoBidInvalidRequest,
+			}
+		}
+		return nil
+	}
+
+	// Get applicable section IDs from the request
+	applicableSIDs := req.Regs.GPPSID
+	if len(applicableSIDs) == 0 {
+		// If no applicable SIDs specified, use all sections from the GPP string
+		applicableSIDs = parsedGPP.SectionIDs
+	}
+
+	// Enforce GPP for bid request activity
+	result := gpp.EnforceForActivity(parsedGPP, applicableSIDs, gpp.ActivityBidRequest)
+
+	if !result.Allowed {
+		logger.Log.Info().
+			Str("request_id", req.ID).
+			Str("gpp", req.Regs.GPP).
+			Ints("applicable_sids", applicableSIDs).
+			Str("reason", result.Reason).
+			Bool("sale_blocked", result.SaleBlocked).
+			Bool("targeted_ads_blocked", result.TargetedAdsBlocked).
+			Msg("GPP compliance violation - blocking request")
+
+		return &PrivacyViolation{
+			Regulation:  "GPP",
+			Reason:      result.Reason,
+			NoBidReason: openrtb.NoBidAdsNotAllowed,
+		}
+	}
+
+	return nil
+}
+
+// CheckGPPBidderConsent checks if a bidder should be blocked based on GPP consent
+// This is a standalone function for use in the exchange during auction
+// Returns true if bidder should be SKIPPED (blocked), false if allowed
+func CheckGPPBidderConsent(req *openrtb.BidRequest) (bool, string) {
+	if req == nil || req.Regs == nil || req.Regs.GPP == "" {
+		return false, ""
+	}
+
+	return gpp.ShouldBlockBidder(req.Regs.GPP, req.Regs.GPPSID)
+}
+
+// GetGPPApplicableRegulations returns the applicable regulations from GPP
+// This helps identify which privacy frameworks apply to the request
+func GetGPPApplicableRegulations(req *openrtb.BidRequest) []string {
+	if req == nil || req.Regs == nil || req.Regs.GPP == "" {
+		return nil
+	}
+
+	var regulations []string
+	for _, sid := range req.Regs.GPPSID {
+		switch sid {
+		case gpp.SectionTCFEUv2:
+			regulations = append(regulations, "GDPR")
+		case gpp.SectionUSNat:
+			regulations = append(regulations, "US-National")
+		case gpp.SectionUSCA:
+			regulations = append(regulations, "CCPA/CPRA")
+		case gpp.SectionUSVA:
+			regulations = append(regulations, "VCDPA")
+		case gpp.SectionUSCO:
+			regulations = append(regulations, "CPA")
+		case gpp.SectionUSUT:
+			regulations = append(regulations, "UCPA")
+		case gpp.SectionUSCT:
+			regulations = append(regulations, "CTDPA")
+		default:
+			if gpp.IsUSPrivacySection(sid) {
+				state := gpp.GetUSStateForSectionID(sid)
+				if state != "" {
+					regulations = append(regulations, state+"-Privacy")
+				}
+			}
+		}
+	}
+	return regulations
 }
 
 // P2-2: IP Anonymization for GDPR Compliance
