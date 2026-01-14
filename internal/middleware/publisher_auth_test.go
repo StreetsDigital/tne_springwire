@@ -130,10 +130,17 @@ func TestPublisherAuth_RegisteredPublisher(t *testing.T) {
 	config := &PublisherAuthConfig{
 		Enabled:           true,
 		AllowUnregistered: false,
-		RegisteredPubs:    map[string]string{"pub123": "example.com"},
 		ValidateDomain:    false, // Don't validate domain for this test
 	}
 	auth := NewPublisherAuth(config)
+
+	// Set up mock PostgreSQL store
+	mockStore := &mockPublisherStore{
+		publishers: map[string]*mockPublisher{
+			"pub123": {publisherID: "pub123", allowedDomains: "example.com"},
+		},
+	}
+	auth.SetPublisherStore(mockStore)
 
 	called := false
 	handler := auth.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -173,9 +180,16 @@ func TestPublisherAuth_UnregisteredPublisher(t *testing.T) {
 	config := &PublisherAuthConfig{
 		Enabled:           true,
 		AllowUnregistered: false,
-		RegisteredPubs:    map[string]string{"pub123": "example.com"},
 	}
 	auth := NewPublisherAuth(config)
+
+	// Set up mock PostgreSQL store with only pub123
+	mockStore := &mockPublisherStore{
+		publishers: map[string]*mockPublisher{
+			"pub123": {publisherID: "pub123", allowedDomains: "example.com"},
+		},
+	}
+	auth.SetPublisherStore(mockStore)
 
 	called := false
 	handler := auth.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +206,7 @@ func TestPublisherAuth_UnregisteredPublisher(t *testing.T) {
 		"site": map[string]interface{}{
 			"domain": "example.com",
 			"publisher": map[string]interface{}{
-				"id": "unknown_pub", // Not in RegisteredPubs
+				"id": "unknown_pub", // Not in database
 			},
 		},
 	}
@@ -215,10 +229,17 @@ func TestPublisherAuth_DomainValidation(t *testing.T) {
 	config := &PublisherAuthConfig{
 		Enabled:           true,
 		AllowUnregistered: false,
-		RegisteredPubs:    map[string]string{"pub123": "allowed.com"},
 		ValidateDomain:    true,
 	}
 	auth := NewPublisherAuth(config)
+
+	// Set up mock PostgreSQL store
+	mockStore := &mockPublisherStore{
+		publishers: map[string]*mockPublisher{
+			"pub123": {publisherID: "pub123", allowedDomains: "allowed.com"},
+		},
+	}
+	auth.SetPublisherStore(mockStore)
 
 	called := false
 	handler := auth.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -258,10 +279,17 @@ func TestPublisherAuth_DomainValidation_Allowed(t *testing.T) {
 	config := &PublisherAuthConfig{
 		Enabled:           true,
 		AllowUnregistered: false,
-		RegisteredPubs:    map[string]string{"pub123": "allowed.com"},
 		ValidateDomain:    true,
 	}
 	auth := NewPublisherAuth(config)
+
+	// Set up mock PostgreSQL store
+	mockStore := &mockPublisherStore{
+		publishers: map[string]*mockPublisher{
+			"pub123": {publisherID: "pub123", allowedDomains: "allowed.com"},
+		},
+	}
+	auth.SetPublisherStore(mockStore)
 
 	called := false
 	handler := auth.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -301,10 +329,17 @@ func TestPublisherAuth_AppPublisher(t *testing.T) {
 	config := &PublisherAuthConfig{
 		Enabled:           true,
 		AllowUnregistered: false,
-		RegisteredPubs:    map[string]string{"app_pub": ""},
 		ValidateDomain:    false,
 	}
 	auth := NewPublisherAuth(config)
+
+	// Set up mock PostgreSQL store
+	mockStore := &mockPublisherStore{
+		publishers: map[string]*mockPublisher{
+			"app_pub": {publisherID: "app_pub", allowedDomains: ""},
+		},
+	}
+	auth.SetPublisherStore(mockStore)
 
 	called := false
 	handler := auth.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -905,12 +940,35 @@ func (m *mockRedisClient) Ping(ctx context.Context) error {
 	return nil
 }
 
-func TestValidatePublisher_WithRedis(t *testing.T) {
-	mockRedis := &mockRedisClient{
-		data: map[string]map[string]string{
-			RedisPublishersHash: {
-				"pub123": "example.com",
-			},
+// Mock publisher for testing
+type mockPublisher struct {
+	publisherID    string
+	allowedDomains string
+}
+
+func (p *mockPublisher) GetAllowedDomains() string {
+	return p.allowedDomains
+}
+
+// Mock PublisherStore for testing (PostgreSQL replacement)
+type mockPublisherStore struct {
+	publishers map[string]*mockPublisher
+}
+
+func (m *mockPublisherStore) GetByPublisherID(ctx context.Context, publisherID string) (interface{}, error) {
+	if m.publishers == nil {
+		return nil, nil
+	}
+	if pub, ok := m.publishers[publisherID]; ok {
+		return pub, nil
+	}
+	return nil, nil
+}
+
+func TestValidatePublisher_WithPostgres(t *testing.T) {
+	mockStore := &mockPublisherStore{
+		publishers: map[string]*mockPublisher{
+			"pub123": {publisherID: "pub123", allowedDomains: "example.com"},
 		},
 	}
 
@@ -918,41 +976,37 @@ func TestValidatePublisher_WithRedis(t *testing.T) {
 		Enabled:           true,
 		AllowUnregistered: false,
 		ValidateDomain:    true,
-		UseRedis:          true,
 	})
-	auth.SetRedisClient(mockRedis)
+	auth.SetPublisherStore(mockStore)
 
 	// Valid publisher with matching domain
-	err := auth.validatePublisher(nil, "pub123", "example.com")
+	err := auth.validatePublisher(context.Background(), "pub123", "example.com")
 	if err != nil {
 		t.Errorf("Expected validation to pass, got error: %v", err)
 	}
 
 	// Valid publisher with non-matching domain
-	err = auth.validatePublisher(nil, "pub123", "wrong.com")
+	err = auth.validatePublisher(context.Background(), "pub123", "wrong.com")
 	if err == nil {
 		t.Error("Expected domain mismatch error")
 	}
 }
 
-func TestValidatePublisher_RedisWildcard(t *testing.T) {
-	mockRedis := &mockRedisClient{
-		data: map[string]map[string]string{
-			RedisPublishersHash: {
-				"pub123": "*",
-			},
+func TestValidatePublisher_PostgresWildcard(t *testing.T) {
+	mockStore := &mockPublisherStore{
+		publishers: map[string]*mockPublisher{
+			"pub123": {publisherID: "pub123", allowedDomains: "*"},
 		},
 	}
 
 	auth := NewPublisherAuth(&PublisherAuthConfig{
-		Enabled:           true,
-		ValidateDomain:    true,
-		UseRedis:          true,
+		Enabled:        true,
+		ValidateDomain: true,
 	})
-	auth.SetRedisClient(mockRedis)
+	auth.SetPublisherStore(mockStore)
 
 	// Wildcard should match any domain
-	err := auth.validatePublisher(nil, "pub123", "any-domain.com")
+	err := auth.validatePublisher(context.Background(), "pub123", "any-domain.com")
 	if err != nil {
 		t.Errorf("Expected wildcard to match any domain, got error: %v", err)
 	}
