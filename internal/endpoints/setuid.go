@@ -110,6 +110,7 @@ func (h *SetUIDHandler) respondWithPixel(w http.ResponseWriter) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 	w.WriteHeader(http.StatusOK)
+	//nolint:errcheck // Error writing response cannot be handled
 	_, _ = w.Write(pixel) // Error writing response cannot be handled
 }
 
@@ -147,6 +148,7 @@ func (h *OptOutHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Return success page
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
+	//nolint:errcheck // Error writing response cannot be handled
 	_, _ = w.Write([]byte(`<!DOCTYPE html>
 <html>
 <head><title>Opted Out</title></head>

@@ -366,7 +366,7 @@ func mergeJSONExt(existing json.RawMessage, additions map[string]interface{}) js
 	// Start with existing data or empty object
 	base := make(map[string]interface{})
 	if len(existing) > 0 {
-		_ = json.Unmarshal(existing, &base)
+		_ = json.Unmarshal(existing, &base) //nolint:errcheck
 	}
 
 	// Merge additions

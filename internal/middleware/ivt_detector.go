@@ -478,7 +478,7 @@ func getClientIP(r *http.Request) string {
 	}
 
 	// Fall back to RemoteAddr
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr) //nolint:errcheck // RemoteAddr may not have port
 	return ip
 }
 

@@ -4,6 +4,7 @@ package exchange
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -1398,7 +1399,11 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 	// P0-1: Convert sync.Map to regular map for return
 	finalResults := make(map[string]*BidderResult)
 	results.Range(func(key, value interface{}) bool {
-		if k, ok := key.(string); ok { if v, ok := value.(*BidderResult); ok { finalResults[k] = v } }
+		if k, ok := key.(string); ok {
+			if v, ok := value.(*BidderResult); ok {
+				finalResults[k] = v
+			}
+		}
 		return true
 	})
 	return finalResults
@@ -1457,7 +1462,7 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 
 	// Apply FPD if available (now safe since we cloned the affected objects)
 	if hasFPD {
-		_ = e.fpdProcessor.ApplyFPDToRequest(&clone, bidderCode, fpdData)
+		_ = e.fpdProcessor.ApplyFPDToRequest(&clone, bidderCode, fpdData) //nolint:errcheck
 	}
 
 	return &clone
@@ -1720,7 +1725,7 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 			resp, err = e.httpClient.Do(ctx, reqData, timeout)
 			if err != nil {
 				// P3-1: Log HTTP request failures with context
-				isTimeout := err == context.DeadlineExceeded || err == context.Canceled
+				isTimeout := errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 				logger.Log.Debug().
 					Str("bidder", bidderCode).
 					Str("uri", reqData.URI).

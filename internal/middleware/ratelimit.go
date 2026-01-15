@@ -24,15 +24,13 @@ type RateLimitConfig struct {
 // DefaultRateLimitConfig returns default rate limit configuration
 func DefaultRateLimitConfig() *RateLimitConfig {
 	rps, err := strconv.Atoi(os.Getenv("RATE_LIMIT_RPS"))
-	if rps <= 0 {
-	if err != nil { rps = 100 }
+	if err != nil || rps <= 0 {
 		rps = 1000 // Default: 1000 requests per second
 	}
 
-	burst, _ := strconv.Atoi(os.Getenv("RATE_LIMIT_BURST"))
-	if err != nil { burst = rps * 2 }
-	if burst <= 0 {
-		burst = 100 // Default burst size
+	burst, err := strconv.Atoi(os.Getenv("RATE_LIMIT_BURST"))
+	if err != nil || burst <= 0 {
+		burst = rps * 2 // Default burst size
 	}
 
 	// Parse trusted proxies from env (comma-separated CIDR ranges)

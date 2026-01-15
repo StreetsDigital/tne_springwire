@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -769,7 +770,7 @@ func TestPublisherAuthError_Unwrap(t *testing.T) {
 		Cause:   cause,
 	}
 
-	if err.Unwrap() != cause {
+	if !errors.Is(err.Unwrap(), cause) {
 		t.Error("Expected Unwrap to return cause")
 	}
 }

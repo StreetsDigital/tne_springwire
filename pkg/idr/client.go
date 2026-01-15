@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -200,7 +201,7 @@ func (c *Client) SelectPartners(ctx context.Context, ortbRequest json.RawMessage
 	})
 
 	// If circuit is open, fail open (return nil, allowing all bidders)
-	if err == ErrCircuitOpen {
+	if errors.Is(err, ErrCircuitOpen) {
 		return nil, nil // Caller should fall back to all bidders
 	}
 
@@ -263,7 +264,7 @@ func (c *Client) SelectPartnersMinimal(ctx context.Context, minReq *MinimalReque
 		return nil
 	})
 
-	if err == ErrCircuitOpen {
+	if errors.Is(err, ErrCircuitOpen) {
 		return nil, nil
 	}
 

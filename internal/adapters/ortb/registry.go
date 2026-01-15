@@ -334,7 +334,7 @@ func (r *DynamicRegistry) RegisterWithStaticRegistry() error {
 		info := adapter.Info()
 
 		// Try to register (ignore errors if already registered)
-		_ = adapters.DefaultRegistry.Register(code, adapter, info)
+		_ = adapters.DefaultRegistry.Register(code, adapter, info) //nolint:errcheck
 	}
 
 	return nil

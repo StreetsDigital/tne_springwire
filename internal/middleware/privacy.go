@@ -194,7 +194,7 @@ func (m *PrivacyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
 			"error":      "Privacy compliance violation",
 			"reason":     violation.Reason,
 			"regulation": violation.Regulation,
