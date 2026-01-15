@@ -1,5 +1,3 @@
-version: "2"
-
 run:
   timeout: 5m
   modules-download-mode: readonly
@@ -70,7 +68,6 @@ issues:
 
 output:
   formats:
-    colored-line-number:
-      path: stdout
+    - format: colored-line-number
   print-issued-lines: true
   print-linter-name: true
