@@ -30,7 +30,8 @@ linters-settings:
     check-type-assertions: true
     check-blank: true
   govet:
-    check-shadowing: true
+    enable:
+      - shadow
   gofmt:
     simplify: true
   goimports:
