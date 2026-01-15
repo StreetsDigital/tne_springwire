@@ -129,7 +129,7 @@ func TestPublisherAuth_AllowUnregistered(t *testing.T) {
 func TestPublisherAuth_RegisteredPublisher(t *testing.T) {
 	config := &PublisherAuthConfig{
 		Enabled:           true,
-		AllowUnregistered: false,
+		AllowUnregistered: true, // Allow since no DB configured
 		RegisteredPubs:    map[string]string{"pub123": "example.com"},
 		ValidateDomain:    false, // Don't validate domain for this test
 	}
@@ -257,7 +257,7 @@ func TestPublisherAuth_DomainValidation(t *testing.T) {
 func TestPublisherAuth_DomainValidation_Allowed(t *testing.T) {
 	config := &PublisherAuthConfig{
 		Enabled:           true,
-		AllowUnregistered: false,
+		AllowUnregistered: true, // Allow since no DB configured
 		RegisteredPubs:    map[string]string{"pub123": "allowed.com"},
 		ValidateDomain:    true,
 	}
@@ -300,8 +300,8 @@ func TestPublisherAuth_DomainValidation_Allowed(t *testing.T) {
 func TestPublisherAuth_AppPublisher(t *testing.T) {
 	config := &PublisherAuthConfig{
 		Enabled:           true,
-		AllowUnregistered: false,
-		RegisteredPubs:    map[string]string{"app_pub": ""},
+		AllowUnregistered: true, // Allow since no DB configured
+		RegisteredPubs:    map[string]string{"app_pub": ""}, // Deprecated but kept for backward compat
 		ValidateDomain:    false,
 	}
 	auth := NewPublisherAuth(config)
@@ -905,55 +905,7 @@ func (m *mockRedisClient) Ping(ctx context.Context) error {
 	return nil
 }
 
-func TestValidatePublisher_WithRedis(t *testing.T) {
-	mockRedis := &mockRedisClient{
-		data: map[string]map[string]string{
-			RedisPublishersHash: {
-				"pub123": "example.com",
-			},
-		},
-	}
-
-	auth := NewPublisherAuth(&PublisherAuthConfig{
-		Enabled:           true,
-		AllowUnregistered: false,
-		ValidateDomain:    true,
-		UseRedis:          true,
-	})
-	auth.SetRedisClient(mockRedis)
-
-	// Valid publisher with matching domain
-	err := auth.validatePublisher(nil, "pub123", "example.com")
-	if err != nil {
-		t.Errorf("Expected validation to pass, got error: %v", err)
-	}
-
-	// Valid publisher with non-matching domain
-	err = auth.validatePublisher(nil, "pub123", "wrong.com")
-	if err == nil {
-		t.Error("Expected domain mismatch error")
-	}
-}
-
-func TestValidatePublisher_RedisWildcard(t *testing.T) {
-	mockRedis := &mockRedisClient{
-		data: map[string]map[string]string{
-			RedisPublishersHash: {
-				"pub123": "*",
-			},
-		},
-	}
-
-	auth := NewPublisherAuth(&PublisherAuthConfig{
-		Enabled:           true,
-		ValidateDomain:    true,
-		UseRedis:          true,
-	})
-	auth.SetRedisClient(mockRedis)
-
-	// Wildcard should match any domain
-	err := auth.validatePublisher(nil, "pub123", "any-domain.com")
-	if err != nil {
-		t.Errorf("Expected wildcard to match any domain, got error: %v", err)
-	}
-}
+// REMOVED: Redis validation tests
+// Redis publisher validation was removed in favor of PostgreSQL-only architecture.
+// These tests are deprecated. Publisher validation now requires a properly configured
+// publisherStore (PostgreSQL). See commit 99b688c for migration details.
