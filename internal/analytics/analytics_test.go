@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -258,9 +259,12 @@ func TestStdoutAdapter(t *testing.T) {
 }
 
 func TestHTTPAdapter(t *testing.T) {
+	var mu sync.Mutex
 	receivedEvents := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		receivedEvents++
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -271,7 +275,6 @@ func TestHTTPAdapter(t *testing.T) {
 		BatchSize:     2,
 		FlushInterval: 100 * time.Millisecond,
 	})
-	defer adapter.Close()
 
 	if adapter.Name() != "http" {
 		t.Errorf("expected name 'http', got '%s'", adapter.Name())
@@ -284,7 +287,14 @@ func TestHTTPAdapter(t *testing.T) {
 	// Wait for batch to be sent
 	time.Sleep(200 * time.Millisecond)
 
-	if receivedEvents == 0 {
+	// Close adapter before checking result
+	adapter.Close()
+
+	mu.Lock()
+	count := receivedEvents
+	mu.Unlock()
+
+	if count == 0 {
 		t.Error("expected HTTP endpoint to receive events")
 	}
 }

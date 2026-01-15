@@ -131,6 +131,7 @@ type HTTPAdapter struct {
 	mu      sync.Mutex
 	batch   []*AuctionEvent
 	done    chan struct{}
+	closed  bool
 }
 
 // HTTPAdapterConfig holds HTTP adapter configuration
@@ -218,6 +219,14 @@ func (a *HTTPAdapter) LogAuctionEvent(ctx context.Context, event *AuctionEvent) 
 
 // Close flushes remaining events and stops the adapter
 func (a *HTTPAdapter) Close() error {
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return nil
+	}
+	a.closed = true
+	a.mu.Unlock()
+
 	close(a.done)
 	return a.flush()
 }

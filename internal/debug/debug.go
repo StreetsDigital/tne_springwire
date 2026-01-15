@@ -276,9 +276,16 @@ func (t *Trace) Summary() *TraceSummary {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// Calculate duration inline to avoid deadlock (Duration() also locks)
+	end := t.EndTime
+	if end.IsZero() {
+		end = time.Now()
+	}
+	duration := end.Sub(t.StartTime)
+
 	summary := &TraceSummary{
 		RequestID:    t.RequestID,
-		Duration:     t.Duration(),
+		Duration:     duration,
 		BidderCount:  len(t.Bidders),
 		WarningCount: len(t.Warnings),
 		ErrorCount:   len(t.Errors),
