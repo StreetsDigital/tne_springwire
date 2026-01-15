@@ -49,6 +49,7 @@ temp/
 
 # Coverage and profiling
 *.coverprofile
+coverage.out
 coverage.html
 cpu.prof
 mem.prof
