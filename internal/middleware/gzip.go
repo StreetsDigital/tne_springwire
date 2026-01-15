@@ -73,13 +73,13 @@ func NewGzip(config *GzipConfig) *Gzip {
 // It buffers the response to decide whether to compress based on size
 type gzipResponseWriter struct {
 	http.ResponseWriter
-	gzipWriter   *gzip.Writer
-	config       *GzipConfig
-	writerPool   *sync.Pool
-	buffer       bytes.Buffer
-	wroteHeader  bool
-	headerCode   int
-	shouldGzip   bool
+	gzipWriter  *gzip.Writer
+	config      *GzipConfig
+	writerPool  *sync.Pool
+	buffer      bytes.Buffer
+	wroteHeader bool
+	headerCode  int
+	shouldGzip  bool
 }
 
 // Header returns the header map
