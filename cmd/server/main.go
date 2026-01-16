@@ -101,8 +101,22 @@ func main() {
 	// Initialize middleware
 	cors := middleware.NewCORS(middleware.DefaultCORSConfig())
 	security := middleware.NewSecurity(nil) // Uses DefaultSecurityConfig()
-	auth := middleware.NewAuth(middleware.DefaultAuthConfig())
+	// Initialize PublisherAuth first to check if it's enabled
 	publisherAuth := middleware.NewPublisherAuth(middleware.DefaultPublisherAuthConfig())
+
+	// Build Auth config with conditional bypass for /openrtb2/auction
+	// If PublisherAuth is enabled, it handles auction auth (bypass general Auth)
+	// If PublisherAuth is disabled, general Auth protects auction endpoint (no bypass)
+	authConfig := middleware.DefaultAuthConfig()
+	if publisherAuth.IsEnabled() {
+		// PublisherAuth handles auction endpoint - bypass general Auth
+		authConfig.BypassPaths = append(authConfig.BypassPaths, "/openrtb2/auction")
+		log.Info().Msg("PublisherAuth enabled - /openrtb2/auction bypasses general Auth")
+	} else {
+		// PublisherAuth disabled - general Auth protects auction endpoint
+		log.Warn().Msg("PublisherAuth disabled - /openrtb2/auction requires API key auth")
+	}
+	auth := middleware.NewAuth(authConfig)
 	rateLimiter := middleware.NewRateLimiter(middleware.DefaultRateLimitConfig())
 	sizeLimiter := middleware.NewSizeLimiter(middleware.DefaultSizeLimitConfig())
 	gzipMiddleware := middleware.NewGzip(middleware.DefaultGzipConfig())

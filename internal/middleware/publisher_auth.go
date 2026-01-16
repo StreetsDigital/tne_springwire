@@ -474,6 +474,13 @@ func (p *PublisherAuth) cleanupStaleRateLimits(now time.Time) {
 	}
 }
 
+// IsEnabled returns whether publisher auth is enabled
+func (p *PublisherAuth) IsEnabled() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.config.Enabled
+}
+
 // RegisterPublisher adds a publisher at runtime
 func (p *PublisherAuth) RegisterPublisher(publisherID, allowedDomains string) {
 	p.mu.Lock()
