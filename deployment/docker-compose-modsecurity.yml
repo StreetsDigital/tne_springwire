@@ -105,22 +105,27 @@ services:
   nginx:
     build:
       context: .
-      dockerfile: nginx-modsecurity.Dockerfile
+      dockerfile: nginx-modsecurity-simple.Dockerfile
     container_name: catalyst-nginx-waf
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      # Backend application
+      - BACKEND=http://catalyst:8000
+      - PROXY_TIMEOUT=120
+      # ModSecurity configuration (can override via .env)
+      - MODSEC_RULE_ENGINE=${MODSEC_RULE_ENGINE:-On}
+      - MODSEC_AUDIT_ENGINE=${MODSEC_AUDIT_ENGINE:-RelevantOnly}
+      - PARANOIA=${PARANOIA:-2}
+      - ANOMALY_INBOUND=${ANOMALY_INBOUND:-5}
+      - ANOMALY_OUTBOUND=${ANOMALY_OUTBOUND:-4}
+      - BLOCKING_PARANOIA=${BLOCKING_PARANOIA:-2}
+      # Disable ENFORCE_BODYPROC_URLENCODED (rule 900010 doesn't exist in this CRS version)
+      - ENFORCE_BODYPROC_URLENCODED=0
     volumes:
-      # Nginx configuration
-      - ./nginx-modsecurity.conf:/etc/nginx/nginx.conf:ro
-      # SSL certificates
-      - ./ssl:/etc/nginx/ssl:ro
-      # ModSecurity configuration
-      - ./modsecurity/modsecurity.conf:/etc/modsecurity.d/modsecurity.conf:ro
-      - ./modsecurity/crs-setup.conf:/etc/modsecurity.d/owasp-crs/crs-setup.conf:ro
-      - ./modsecurity/custom-rules:/etc/nginx/modsecurity.d/custom-rules:ro
-      # Logs
+      # Logs only
       - ./nginx-logs:/var/log/nginx
       - ./modsec-logs:/var/log/modsec
     depends_on:
@@ -147,14 +152,6 @@ services:
       options:
         max-size: "50m"  # Increased for WAF logs
         max-file: "10"
-    environment:
-      # ModSecurity configuration (can override via .env)
-      - MODSEC_RULE_ENGINE=${MODSEC_RULE_ENGINE:-On}
-      - MODSEC_AUDIT_ENGINE=${MODSEC_AUDIT_ENGINE:-RelevantOnly}
-      - PARANOIA=${PARANOIA:-2}
-      - ANOMALY_INBOUND=${ANOMALY_INBOUND:-5}
-      - ANOMALY_OUTBOUND=${ANOMALY_OUTBOUND:-4}
-      - BLOCKING_PARANOIA=${BLOCKING_PARANOIA:-2}
 
 networks:
   catalyst-network:

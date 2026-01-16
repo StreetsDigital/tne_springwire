@@ -1,13 +1,14 @@
 # ModSecurity + Nginx WAF for Catalyst Auction Server
 # Built on official OWASP ModSecurity CRS image with Alpine base
 
-FROM owasp/modsecurity-crs:3.3.5-nginx-alpine
+FROM owasp/modsecurity-crs:nginx-alpine
 
 LABEL maintainer="thenexusengine"
 LABEL description="Nginx + ModSecurity WAF for OpenRTB auction server"
 LABEL version="1.0.0"
 
 # Install additional tools for monitoring and debugging
+USER root
 RUN apk add --no-cache \
     curl \
     wget \
@@ -96,6 +97,9 @@ COPY modsecurity/modsecurity.conf /etc/modsecurity.d/modsecurity.conf
 
 # Copy CRS setup
 COPY modsecurity/crs-setup.conf /etc/modsecurity.d/owasp-crs/crs-setup.conf
+
+# Copy Nginx configuration
+COPY nginx-modsecurity.conf /etc/nginx/conf.d/default.conf
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
