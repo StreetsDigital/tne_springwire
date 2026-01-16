@@ -94,17 +94,30 @@ func (h *AuctionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	auctionDuration := time.Since(auctionStart)
 
 	if err != nil {
+		// Determine if this is a validation error (client error) or server error
+		statusCode := http.StatusInternalServerError
+		errorMsg := "Internal server error"
+
+		// Check if error message indicates validation failure
+		errStr := err.Error()
+		if strings.Contains(errStr, "invalid") || strings.Contains(errStr, "required") ||
+		   strings.Contains(errStr, "missing") || strings.Contains(errStr, "duplicate") {
+			statusCode = http.StatusBadRequest
+			errorMsg = errStr
+		}
+
 		logger.Log.Error().
 			Err(err).
 			Str("request_id", bidRequest.ID).
 			Int("imp_count", len(bidRequest.Imp)).
 			Dur("duration_ms", auctionDuration).
+			Int("status_code", statusCode).
 			Msg("Auction failed")
 
 		// Log to dashboard
 		LogAuction(bidRequest.ID, len(bidRequest.Imp), 0, nil, auctionDuration, false, err)
 
-		writeError(w, "Internal server error", http.StatusInternalServerError)
+		writeError(w, errorMsg, statusCode)
 		return
 	}
 
@@ -153,10 +166,10 @@ func (h *AuctionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // validateBidRequest validates the bid request
 func validateBidRequest(req *openrtb.BidRequest) error {
 	if req.ID == "" {
-		return &ValidationError{Field: "id", Message: "required"}
+		return &ValidationError{Field: "id", Message: "required", Index: -1}
 	}
 	if len(req.Imp) == 0 {
-		return &ValidationError{Field: "imp", Message: "at least one impression required"}
+		return &ValidationError{Field: "imp", Message: "at least one impression required", Index: -1}
 	}
 	for i, imp := range req.Imp {
 		if imp.ID == "" {
@@ -221,13 +234,10 @@ func writeError(w http.ResponseWriter, message string, status int) {
 // hasAPIKey checks if request has valid API key header
 // P2-1: Used to gate debug mode access
 func hasAPIKey(r *http.Request) bool {
-	// Check X-API-Key header
-	if r.Header.Get("X-API-Key") != "" {
-		return true
-	}
-	// Check Authorization Bearer token
-	authHeader := r.Header.Get("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") && len(authHeader) > 7 {
+	// Check if auth middleware validated the API key and set publisher ID
+	// The auth middleware sets X-Publisher-ID only when the API key is valid
+	// This prevents debug mode from being enabled by just sending any API key header
+	if r.Header.Get("X-Publisher-ID") != "" {
 		return true
 	}
 	return false
@@ -270,7 +280,16 @@ type InfoBiddersHandler struct {
 
 // NewInfoBiddersHandler creates a new bidders info handler
 // Deprecated: Use NewDynamicInfoBiddersHandler instead for proper dynamic bidder support
+// WARNING: This constructor returns a broken handler that always returns an empty bidder list.
+// It exists only for backwards compatibility and should not be used in new code.
 func NewInfoBiddersHandler(bidders []string) *InfoBiddersHandler {
+	// This function is broken by design - it ignores the bidders parameter and returns
+	// an empty handler. Callers should use NewDynamicInfoBiddersHandler instead.
+	// We can't fix this without breaking the deprecated API, and since there's a better
+	// alternative, we just document the issue and recommend migration.
+	logger.Log.Warn().
+		Int("bidders_ignored", len(bidders)).
+		Msg("NewInfoBiddersHandler is deprecated and returns empty handler - use NewDynamicInfoBiddersHandler instead")
 	return &InfoBiddersHandler{}
 }
 

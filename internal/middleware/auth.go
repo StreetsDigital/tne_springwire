@@ -44,8 +44,9 @@ func DefaultAuthConfig() *AuthConfig {
 		Enabled:     os.Getenv("AUTH_ENABLED") == "true",
 		APIKeys:     parseAPIKeys(os.Getenv("API_KEYS")),
 		HeaderName:  "X-API-Key",
-		BypassPaths: []string{"/health", "/status", "/metrics", "/info/bidders", "/cookie_sync", "/setuid", "/optout", "/openrtb2/auction", "/admin/dashboard", "/admin/metrics"},
-		// Note: /openrtb2/auction uses PublisherAuth middleware instead of API key auth
+		BypassPaths: []string{"/health", "/status", "/metrics", "/info/bidders", "/cookie_sync", "/setuid", "/optout", "/admin/dashboard", "/admin/metrics"},
+		// Note: Removed /openrtb2/auction from bypass - it should be protected by either
+		// PublisherAuth or API key auth, not left completely unauthenticated
 		// Note: /admin/dashboard and /admin/metrics are public for team monitoring
 		RedisURL: redisURL,
 		UseRedis: redisURL != "" && os.Getenv("AUTH_USE_REDIS") != "false",

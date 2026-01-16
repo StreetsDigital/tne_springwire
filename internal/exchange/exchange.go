@@ -813,9 +813,11 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 
 	// P1-2: Validate impression count early to prevent OOM from malicious requests
 	// This check must happen BEFORE allocating maps based on impression count
-	if len(req.BidRequest.Imp) > defaultMaxImpressionsPerRequest {
+	// Use configured limit instead of hardcoded constant to allow higher limits when needed
+	maxImpressions := e.config.CloneLimits.MaxImpressionsPerRequest
+	if len(req.BidRequest.Imp) > maxImpressions {
 		return nil, fmt.Errorf("invalid bid request: too many impressions (max %d, got %d)",
-			defaultMaxImpressionsPerRequest, len(req.BidRequest.Imp))
+			maxImpressions, len(req.BidRequest.Imp))
 	}
 
 	// P2-3: Validate Site/App mutual exclusivity per OpenRTB 2.5 section 3.2.1
@@ -1817,10 +1819,16 @@ func (e *Exchange) buildBidExtension(vb ValidatedBid) *openrtb.BidExt {
 	targeting := map[string]string{
 		"hb_pb":                          priceBucket,
 		"hb_bidder":                      displayBidderCode,
-		"hb_size":                        fmt.Sprintf("%dx%d", bid.W, bid.H),
 		"hb_pb_" + displayBidderCode:     priceBucket,
 		"hb_bidder_" + displayBidderCode: displayBidderCode,
-		"hb_size_" + displayBidderCode:   fmt.Sprintf("%dx%d", bid.W, bid.H),
+	}
+
+	// Only add hb_size for bids that have valid dimensions
+	// Video/native/audio bids often don't set W/H, and "0x0" breaks Prebid targeting
+	if bid.W > 0 && bid.H > 0 {
+		sizeStr := fmt.Sprintf("%dx%d", bid.W, bid.H)
+		targeting["hb_size"] = sizeStr
+		targeting["hb_size_"+displayBidderCode] = sizeStr
 	}
 
 	// Add deal ID if present

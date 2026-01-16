@@ -451,10 +451,27 @@ func (p *PublisherAuth) checkRateLimit(publisherID string) bool {
 	// Try to consume a token
 	if entry.tokens >= 1 {
 		entry.tokens--
+		// Opportunistic cleanup to prevent unbounded memory growth
+		// Remove stale entries if map is getting too large (>1000 entries)
+		if len(p.rateLimits) > 1000 {
+			p.cleanupStaleRateLimits(now)
+		}
 		return true
 	}
 
 	return false
+}
+
+// cleanupStaleRateLimits removes rate limit entries that haven't been accessed recently
+// This prevents unbounded memory growth from unique publisher IDs (DoS vector)
+func (p *PublisherAuth) cleanupStaleRateLimits(now time.Time) {
+	// Remove entries not accessed in the last hour
+	staleThreshold := now.Add(-1 * time.Hour)
+	for pubID, entry := range p.rateLimits {
+		if entry.lastCheck.Before(staleThreshold) {
+			delete(p.rateLimits, pubID)
+		}
+	}
 }
 
 // RegisterPublisher adds a publisher at runtime
