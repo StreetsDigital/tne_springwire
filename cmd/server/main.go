@@ -4,9 +4,11 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +21,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/adapters/ortb"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/pubmatic"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/rubicon"
+	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	pbsconfig "github.com/thenexusengine/tne_springwire/internal/config"
 	"github.com/thenexusengine/tne_springwire/internal/endpoints"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
@@ -53,6 +56,7 @@ func main() {
 	log.Info().Msg("Prometheus metrics enabled")
 
 	// Initialize PostgreSQL database connection
+	var dbConn *sql.DB
 	var db *storage.BidderStore
 	var publisherStore *storage.PublisherStore
 	dbHost := os.Getenv("DB_HOST")
@@ -63,7 +67,8 @@ func main() {
 		dbName := getEnvOrDefault("DB_NAME", "catalyst")
 		dbSSLMode := getEnvOrDefault("DB_SSL_MODE", "disable")
 
-		dbConn, err := storage.NewDBConnection(dbHost, dbPort, dbUser, dbPassword, dbName, dbSSLMode)
+		var err error
+		dbConn, err = storage.NewDBConnection(dbHost, dbPort, dbUser, dbPassword, dbName, dbSSLMode)
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to connect to PostgreSQL, database-backed features disabled")
 		} else {
@@ -146,6 +151,48 @@ func main() {
 	// Wire up metrics for margin tracking
 	ex.SetMetrics(m)
 	log.Info().Msg("Metrics connected to exchange for margin tracking")
+
+	// Initialize analytics pipeline if database is available
+	var analyticsEngine *analytics.Engine
+	var analyticsAggregator *analytics.Aggregator
+	analyticsEnabled := getEnvBoolOrDefault("ANALYTICS_ENABLED", true)
+	if dbConn != nil && analyticsEnabled {
+		// Create analytics engine
+		analyticsConfig := analytics.DefaultConfig()
+		analyticsConfig.SampleRate = 1.0 // Log all events by default; adjust via env if needed
+		if sampleRate := os.Getenv("ANALYTICS_SAMPLE_RATE"); sampleRate != "" {
+			// Parse sample rate (0.0 to 1.0)
+			var rate float64
+			if _, err := fmt.Sscanf(sampleRate, "%f", &rate); err == nil && rate >= 0 && rate <= 1 {
+				analyticsConfig.SampleRate = rate
+			}
+		}
+		analyticsEngine = analytics.NewEngine(analyticsConfig)
+
+		// Create and add PostgreSQL adapter
+		postgresConfig := analytics.DefaultPostgresAdapterConfig()
+		postgresConfig.BatchSize = 100
+		postgresConfig.FlushInterval = 5 * time.Second
+		postgresAdapter := analytics.NewPostgresAdapter(dbConn, postgresConfig)
+		analyticsEngine.AddAdapter(postgresAdapter)
+
+		// Wire analytics to exchange
+		ex.SetAnalytics(analyticsEngine)
+
+		// Start aggregator for hourly/daily rollups
+		aggregatorConfig := analytics.DefaultAggregatorConfig()
+		analyticsAggregator = analytics.NewAggregator(dbConn, aggregatorConfig)
+		analyticsAggregator.Start()
+
+		log.Info().
+			Float64("sample_rate", analyticsConfig.SampleRate).
+			Int("batch_size", postgresConfig.BatchSize).
+			Msg("Analytics pipeline initialized with PostgreSQL adapter")
+	} else if !analyticsEnabled {
+		log.Info().Msg("Analytics disabled via ANALYTICS_ENABLED=false")
+	} else {
+		log.Info().Msg("Analytics disabled (no database connection)")
+	}
 
 	// Initialize dynamic registry if Redis is available
 	var dynamicRegistry *ortb.DynamicRegistry
@@ -315,6 +362,19 @@ func main() {
 	if dynamicRegistry != nil {
 		dynamicRegistry.Stop()
 		log.Info().Msg("Dynamic registry stopped")
+	}
+
+	// Stop analytics aggregator and flush pending events
+	if analyticsAggregator != nil {
+		analyticsAggregator.Stop()
+		log.Info().Msg("Analytics aggregator stopped")
+	}
+	if analyticsEngine != nil {
+		if err := analyticsEngine.Close(); err != nil {
+			log.Warn().Err(err).Msg("Error closing analytics engine")
+		} else {
+			log.Info().Msg("Analytics engine closed")
+		}
 	}
 
 	// Flush pending events from exchange

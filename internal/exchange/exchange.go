@@ -12,6 +12,7 @@ import (
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/ortb"
+	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	"github.com/thenexusengine/tne_springwire/internal/fpd"
 	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
@@ -36,6 +37,7 @@ type Exchange struct {
 	fpdProcessor     *fpd.Processor
 	eidFilter        *fpd.EIDFilter
 	metrics          MetricsRecorder
+	analyticsEngine  *analytics.Engine
 
 	// configMu protects dynamicRegistry, fpdProcessor, eidFilter, and config.FPD
 	// for safe concurrent access during runtime config updates
@@ -250,6 +252,20 @@ func (e *Exchange) SetMetrics(m MetricsRecorder) {
 	e.configMu.Lock()
 	defer e.configMu.Unlock()
 	e.metrics = m
+}
+
+// SetAnalytics sets the analytics engine for event logging
+func (e *Exchange) SetAnalytics(engine *analytics.Engine) {
+	e.configMu.Lock()
+	defer e.configMu.Unlock()
+	e.analyticsEngine = engine
+}
+
+// GetAnalytics returns the analytics engine (for admin/status endpoints)
+func (e *Exchange) GetAnalytics() *analytics.Engine {
+	e.configMu.RLock()
+	defer e.configMu.RUnlock()
+	return e.analyticsEngine
 }
 
 // GetDynamicRegistry returns the dynamic registry
@@ -862,6 +878,11 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 		},
 	}
 
+	// Log auction start if analytics is enabled
+	if e.analyticsEngine != nil {
+		e.analyticsEngine.LogAuctionStart(req.BidRequest)
+	}
+
 	// Validate the bid request per OpenRTB 2.x specification
 	if validationErr := ValidateRequest(req.BidRequest); validationErr != nil {
 		response.DebugInfo.TotalLatency = time.Since(startTime)
@@ -1211,6 +1232,44 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 		Int("bids", totalBids).
 		Dur("latency", response.DebugInfo.TotalLatency).
 		Msg("auction completed")
+
+	// Log auction end and bid events to analytics
+	if e.analyticsEngine != nil {
+		e.analyticsEngine.LogAuctionEnd(req.BidRequest, response.BidResponse, response.DebugInfo.TotalLatency)
+
+		// Log individual bid events for each bidder result
+		for bidderCode, result := range response.BidderResults {
+			if len(result.Bids) > 0 {
+				// Log bid responses
+				bids := make([]openrtb.Bid, 0, len(result.Bids))
+				for _, tb := range result.Bids {
+					if tb.Bid != nil {
+						bids = append(bids, *tb.Bid)
+					}
+				}
+				e.analyticsEngine.LogBidResponse(req.BidRequest.ID, bidderCode, bids, result.Latency)
+			} else if result.TimedOut {
+				// Log timeout
+				e.analyticsEngine.LogBidTimeout(req.BidRequest.ID, bidderCode, result.Latency)
+			} else if len(result.Errors) > 0 {
+				// Log first error
+				e.analyticsEngine.LogBidError(req.BidRequest.ID, bidderCode, "error", result.Errors[0].Error())
+			} else {
+				// Log no-bid
+				e.analyticsEngine.LogNoBid(req.BidRequest.ID, bidderCode, "no_bid")
+			}
+		}
+
+		// Log winning bids
+		if response.BidResponse != nil {
+			for _, seatBid := range response.BidResponse.SeatBid {
+				for _, bid := range seatBid.Bid {
+					// Mark as winner (the bid that made it into the response)
+					e.analyticsEngine.LogBidWon(req.BidRequest.ID, seatBid.Seat, bid.ID, bid.ImpID, bid.Price)
+				}
+			}
+		}
+	}
 
 	return response, nil
 }
