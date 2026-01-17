@@ -478,3 +478,167 @@ func clearEnvVars(t *testing.T) {
 		os.Unsetenv(key)
 	}
 }
+
+func TestParseConfig_AllEnvironmentVariables(t *testing.T) {
+	clearEnvVars(t)
+
+	// Set all possible environment variables
+	t.Setenv("PBS_PORT", "9090")
+	t.Setenv("IDR_URL", "http://idr.custom.com:9000")
+	t.Setenv("IDR_ENABLED", "false")
+	t.Setenv("IDR_API_KEY", "super-secret-key")
+	t.Setenv("REDIS_URL", "redis://redis.example.com:6380/1")
+	t.Setenv("CURRENCY_CONVERSION_ENABLED", "false")
+	t.Setenv("PBS_DISABLE_GDPR_ENFORCEMENT", "true")
+	t.Setenv("PBS_HOST_URL", "https://custom-host.com")
+	t.Setenv("DB_HOST", "db.example.com")
+	t.Setenv("DB_PORT", "5433")
+	t.Setenv("DB_USER", "customuser")
+	t.Setenv("DB_PASSWORD", "custompass")
+	t.Setenv("DB_NAME", "customdb")
+	t.Setenv("DB_SSL_MODE", "require")
+
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+
+	cfg := ParseConfig()
+
+	// Verify all values
+	if cfg.Port != "9090" {
+		t.Errorf("Expected port '9090', got '%s'", cfg.Port)
+	}
+
+	if cfg.IDRUrl != "http://idr.custom.com:9000" {
+		t.Errorf("Expected IDR URL, got '%s'", cfg.IDRUrl)
+	}
+
+	if cfg.IDREnabled {
+		t.Error("Expected IDR to be disabled")
+	}
+
+	if cfg.IDRAPIKey != "super-secret-key" {
+		t.Errorf("Expected IDR API key, got '%s'", cfg.IDRAPIKey)
+	}
+
+	if cfg.RedisURL != "redis://redis.example.com:6380/1" {
+		t.Errorf("Expected Redis URL, got '%s'", cfg.RedisURL)
+	}
+
+	if cfg.CurrencyConversionEnabled {
+		t.Error("Expected currency conversion to be disabled")
+	}
+
+	if !cfg.DisableGDPREnforcement {
+		t.Error("Expected GDPR enforcement to be disabled")
+	}
+
+	if cfg.HostURL != "https://custom-host.com" {
+		t.Errorf("Expected host URL, got '%s'", cfg.HostURL)
+	}
+
+	if cfg.DatabaseConfig == nil {
+		t.Fatal("Expected database config to be set")
+	}
+
+	dbCfg := cfg.DatabaseConfig
+	if dbCfg.Host != "db.example.com" {
+		t.Errorf("Expected DB host, got '%s'", dbCfg.Host)
+	}
+
+	if dbCfg.Port != "5433" {
+		t.Errorf("Expected DB port, got '%s'", dbCfg.Port)
+	}
+
+	if dbCfg.User != "customuser" {
+		t.Errorf("Expected DB user, got '%s'", dbCfg.User)
+	}
+
+	if dbCfg.Password != "custompass" {
+		t.Errorf("Expected DB password, got '%s'", dbCfg.Password)
+	}
+
+	if dbCfg.Name != "customdb" {
+		t.Errorf("Expected DB name, got '%s'", dbCfg.Name)
+	}
+
+	if dbCfg.SSLMode != "require" {
+		t.Errorf("Expected DB SSL mode, got '%s'", dbCfg.SSLMode)
+	}
+}
+
+func TestParseConfig_MixedFlagsAndEnv(t *testing.T) {
+	clearEnvVars(t)
+
+	// Set some env vars
+	t.Setenv("PBS_PORT", "7777")
+	t.Setenv("IDR_API_KEY", "env-key")
+
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+
+	cfg := ParseConfig()
+
+	// Port should come from env
+	if cfg.Port != "7777" {
+		t.Errorf("Expected port from env, got '%s'", cfg.Port)
+	}
+
+	// API key should come from env
+	if cfg.IDRAPIKey != "env-key" {
+		t.Errorf("Expected API key from env, got '%s'", cfg.IDRAPIKey)
+	}
+}
+
+func TestGetEnvBoolOrDefault_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		setValue bool
+		defVal   bool
+		expected bool
+	}{
+		{
+			name:     "TRUE uppercase",
+			value:    "TRUE",
+			setValue: true,
+			defVal:   false,
+			expected: false, // Only lowercase "true" is accepted
+		},
+		{
+			name:     "Yes uppercase",
+			value:    "YES",
+			setValue: true,
+			defVal:   false,
+			expected: false, // Only lowercase "yes" is accepted
+		},
+		{
+			name:     "Random string",
+			value:    "random",
+			setValue: true,
+			defVal:   true,
+			expected: false,
+		},
+		{
+			name:     "Number 2",
+			value:    "2",
+			setValue: true,
+			defVal:   false,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := "TEST_BOOL_EDGE"
+			if tt.setValue {
+				t.Setenv(key, tt.value)
+			} else {
+				os.Unsetenv(key)
+			}
+
+			result := getEnvBoolOrDefault(key, tt.defVal)
+
+			if result != tt.expected {
+				t.Errorf("Expected %v, got %v for value '%s'", tt.expected, result, tt.value)
+			}
+		})
+	}
+}
