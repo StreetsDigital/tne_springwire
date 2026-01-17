@@ -212,9 +212,7 @@ func (m *PrivacyMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if m.anonymizeRawRequestIPs(rawRequest, &bidRequest) {
 				requestModified = true
 				// Re-marshal from map to preserve all fields
-				var modifiedBody []byte
-				modifiedBody, err = json.Marshal(rawRequest)
-				if err == nil {
+				if modifiedBody, err := json.Marshal(rawRequest); err == nil {
 					body = modifiedBody
 				} else {
 					logger.Log.Error().Err(err).Msg("Failed to marshal modified request after IP anonymization")
@@ -990,6 +988,34 @@ func AnonymizeIP(ipStr string) string {
 	}
 	// Otherwise treat as IPv6
 	return AnonymizeIPv6(ip)
+}
+
+// anonymizeRequestIPs modifies the bid request to anonymize IP addresses
+// This is called when GDPR applies and IP anonymization is enabled
+func (m *PrivacyMiddleware) anonymizeRequestIPs(req *openrtb.BidRequest) {
+	if req.Device == nil {
+		return
+	}
+
+	if req.Device.IP != "" {
+		originalIP := req.Device.IP
+		req.Device.IP = AnonymizeIP(originalIP)
+		logger.Log.Debug().
+			Str("request_id", req.ID).
+			Str("original_ip", originalIP).
+			Str("anonymized_ip", req.Device.IP).
+			Msg("P2-2: Anonymized IPv4 for GDPR compliance")
+	}
+
+	if req.Device.IPv6 != "" {
+		originalIPv6 := req.Device.IPv6
+		req.Device.IPv6 = AnonymizeIP(originalIPv6)
+		logger.Log.Debug().
+			Str("request_id", req.ID).
+			Str("original_ipv6", originalIPv6).
+			Str("anonymized_ipv6", req.Device.IPv6).
+			Msg("P2-2: Anonymized IPv6 for GDPR compliance")
+	}
 }
 
 // anonymizeRawRequestIPs modifies IP addresses in the raw JSON map without losing unknown fields
