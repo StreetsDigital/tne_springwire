@@ -958,4 +958,10 @@ type mockMetricsRecorder struct{}
 
 func (m *mockMetricsRecorder) RecordMargin(publisher, bidder, mediaType string, originalPrice, adjustedPrice, platformCut float64) {
 }
-func (m *mockMetricsRecorder) RecordFloorAdjustment(publisher string) {}
+func (m *mockMetricsRecorder) RecordFloorAdjustment(publisher string)                   {}
+func (m *mockMetricsRecorder) SetBidderCircuitState(bidder, state string)               {}
+func (m *mockMetricsRecorder) RecordBidderCircuitRequest(bidder string)                 {}
+func (m *mockMetricsRecorder) RecordBidderCircuitFailure(bidder string)                 {}
+func (m *mockMetricsRecorder) RecordBidderCircuitSuccess(bidder string)                 {}
+func (m *mockMetricsRecorder) RecordBidderCircuitRejected(bidder string)                {}
+func (m *mockMetricsRecorder) RecordBidderCircuitStateChange(bidder, from, to string) {}

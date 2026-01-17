@@ -33,10 +33,17 @@ func NewValidationError(format string, args ...interface{}) *ValidationError {
 	return &ValidationError{Message: fmt.Sprintf(format, args...)}
 }
 
-// MetricsRecorder interface for recording revenue/margin metrics
+// MetricsRecorder interface for recording revenue/margin metrics and circuit breaker metrics
 type MetricsRecorder interface {
 	RecordMargin(publisher, bidder, mediaType string, originalPrice, adjustedPrice, platformCut float64)
 	RecordFloorAdjustment(publisher string)
+	// Circuit breaker metrics
+	SetBidderCircuitState(bidder, state string)
+	RecordBidderCircuitRequest(bidder string)
+	RecordBidderCircuitFailure(bidder string)
+	RecordBidderCircuitSuccess(bidder string)
+	RecordBidderCircuitRejected(bidder string)
+	RecordBidderCircuitStateChange(bidder, fromState, toState string)
 }
 
 // Exchange orchestrates the auction process
@@ -286,12 +293,23 @@ func (e *Exchange) initBidderCircuitBreaker(bidderCode string) {
 				Str("from_state", from).
 				Str("to_state", to).
 				Msg("Bidder circuit breaker state changed")
+
+			// Record state change metrics
+			if e.metrics != nil {
+				e.metrics.SetBidderCircuitState(bidderCode, to)
+				e.metrics.RecordBidderCircuitStateChange(bidderCode, from, to)
+			}
 		},
 	}
 
 	e.bidderBreakersMu.Lock()
 	e.bidderBreakers[bidderCode] = idr.NewCircuitBreaker(config)
 	e.bidderBreakersMu.Unlock()
+
+	// Initialize state metric to closed
+	if e.metrics != nil {
+		e.metrics.SetBidderCircuitState(bidderCode, "closed")
+	}
 }
 
 // getBidderCircuitBreaker retrieves the circuit breaker for a specific bidder
@@ -1282,6 +1300,11 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 			}
 			results.Store(bidderCode, result)
 
+			// Record rejected request metric
+			if e.metrics != nil {
+				e.metrics.RecordBidderCircuitRejected(bidderCode)
+			}
+
 			logger.Log.Debug().
 				Str("bidder_code", bidderCode).
 				Msg("Skipping bidder - circuit breaker OPEN")
@@ -1353,10 +1376,23 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 				// Record result in circuit breaker
 				breaker := e.getBidderCircuitBreaker(code)
 				if breaker != nil {
+					// Record request metric
+					if e.metrics != nil {
+						e.metrics.RecordBidderCircuitRequest(code)
+					}
+
 					if len(result.Errors) > 0 || result.TimedOut {
 						breaker.RecordFailure()
+						// Record failure metric
+						if e.metrics != nil {
+							e.metrics.RecordBidderCircuitFailure(code)
+						}
 					} else if len(result.Bids) > 0 {
 						breaker.RecordSuccess()
+						// Record success metric
+						if e.metrics != nil {
+							e.metrics.RecordBidderCircuitSuccess(code)
+						}
 					}
 				}
 

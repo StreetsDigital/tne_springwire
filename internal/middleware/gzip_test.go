@@ -290,3 +290,25 @@ func TestGzipMiddleware_NilConfig(t *testing.T) {
 		t.Error("Should compress with default config")
 	}
 }
+
+func TestGzipMiddleware_EmptyContentType(t *testing.T) {
+	gz := NewGzip(nil)
+
+	// Handler that doesn't set Content-Type
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("test"))
+	})
+
+	wrapped := gz.Middleware(handler)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	wrapped.ServeHTTP(rec, req)
+
+	// Should not compress when content type is empty
+	if rec.Header().Get("Content-Encoding") == "gzip" {
+		t.Error("Should not compress without content type")
+	}
+}

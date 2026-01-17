@@ -267,3 +267,25 @@ func TestExtractDomain(t *testing.T) {
 		})
 	}
 }
+
+func TestIVTDetector_GetConfig(t *testing.T) {
+	config := DefaultIVTConfig()
+	config.MonitoringEnabled = true
+	config.BlockingEnabled = true
+
+	detector := NewIVTDetector(config)
+
+	retrievedConfig := detector.GetConfig()
+
+	if retrievedConfig == nil {
+		t.Fatal("Expected non-nil config")
+	}
+
+	if !retrievedConfig.MonitoringEnabled {
+		t.Error("Expected config.MonitoringEnabled to be true")
+	}
+
+	if !retrievedConfig.BlockingEnabled {
+		t.Error("Expected config.BlockingEnabled to be true")
+	}
+}

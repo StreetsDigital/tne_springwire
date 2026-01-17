@@ -1,8 +1,12 @@
 package usersync
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -202,5 +206,35 @@ func TestCookieExpiredUID(t *testing.T) {
 	}
 	if c.HasUID("expired") {
 		t.Error("HasUID should return false for expired UID")
+	}
+}
+
+func TestCookie_TrimToFit(t *testing.T) {
+	c := NewCookie()
+
+	// Add many UIDs to exceed cookie size
+	// Each UID adds significant data, so we'll add many of them
+	for i := 0; i < 200; i++ {
+		bidder := "bidder" + strconv.Itoa(i)
+		c.SetUID(bidder, "verylonguid"+strings.Repeat("x", 50))
+	}
+
+	// Trigger trim
+	c.trimToFit()
+
+	// After trimming, cookie should fit in max size
+	data, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("Failed to marshal cookie: %v", err)
+	}
+
+	encoded := base64.URLEncoding.EncodeToString(data)
+	if len(encoded) > MaxCookieSize {
+		t.Errorf("Cookie size %d exceeds max %d after trim", len(encoded), MaxCookieSize)
+	}
+
+	// Should have removed some UIDs
+	if len(c.UIDs) >= 200 {
+		t.Errorf("Expected some UIDs to be removed, still have %d", len(c.UIDs))
 	}
 }

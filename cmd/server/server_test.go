@@ -1055,3 +1055,87 @@ func TestServer_ConfigValues(t *testing.T) {
 		t.Errorf("Expected host URL, got %s", cfg.HostURL)
 	}
 }
+
+func TestHealthHandler_Standalone(t *testing.T) {
+	handler := healthHandler()
+
+	req := httptest.NewRequest("GET", "/health", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("Invalid JSON response: %v", err)
+	}
+
+	if status, ok := response["status"]; !ok || status != "healthy" {
+		t.Errorf("Expected status 'healthy', got '%v'", status)
+	}
+
+	// Check timestamp field exists
+	if _, ok := response["timestamp"]; !ok {
+		t.Error("Expected 'timestamp' field in response")
+	}
+
+	// Check version field exists
+	if version, ok := response["version"]; !ok {
+		t.Error("Expected 'version' field in response")
+	} else if version != "1.0.0" {
+		t.Errorf("Expected version '1.0.0', got '%v'", version)
+	}
+}
+
+func TestLoggingMiddleware_HeadersSet(t *testing.T) {
+	if testServer == nil {
+		t.Skip("Test server not initialized")
+	}
+
+	req := httptest.NewRequest("GET", "/health", nil)
+	rr := httptest.NewRecorder()
+
+	testServer.httpServer.Handler.ServeHTTP(rr, req)
+
+	// Verify middleware added headers
+	if rr.Header().Get("X-Request-ID") == "" {
+		t.Error("Expected X-Request-ID header to be set by middleware")
+	}
+}
+
+func TestReadyHandler_ChecksStructure(t *testing.T) {
+	if testServer == nil || testServer.exchange == nil {
+		t.Skip("Test server or exchange not initialized")
+	}
+
+	handler := readyHandler(nil, testServer.exchange)
+
+	req := httptest.NewRequest("GET", "/health/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("Invalid JSON response: %v", err)
+	}
+
+	// Check that checks field exists
+	checks, ok := response["checks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected 'checks' to be a map")
+	}
+
+	// Verify redis check exists (even if disabled)
+	if _, ok := checks["redis"]; !ok {
+		t.Error("Expected 'redis' check in response")
+	}
+
+	// Verify idr check exists (even if disabled)
+	if _, ok := checks["idr"]; !ok {
+		t.Error("Expected 'idr' check in response")
+	}
+}

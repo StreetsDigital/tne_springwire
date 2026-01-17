@@ -31,6 +31,14 @@ type Metrics struct {
 	BidderErrors   *prometheus.CounterVec
 	BidderTimeouts *prometheus.CounterVec
 
+	// Bidder Circuit Breaker metrics
+	BidderCircuitState        *prometheus.GaugeVec   // Current state per bidder (0=closed, 1=open, 2=half-open)
+	BidderCircuitRequests     *prometheus.CounterVec // Total requests through circuit breaker
+	BidderCircuitFailures     *prometheus.CounterVec // Total failures recorded
+	BidderCircuitSuccesses    *prometheus.CounterVec // Total successes recorded
+	BidderCircuitRejected     *prometheus.CounterVec // Requests rejected (circuit open)
+	BidderCircuitStateChanges *prometheus.CounterVec // State transitions
+
 	// IDR metrics
 	IDRRequests     *prometheus.CounterVec
 	IDRLatency      *prometheus.HistogramVec
@@ -174,6 +182,56 @@ func NewMetrics(namespace string) *Metrics {
 			[]string{"bidder"},
 		),
 
+		// Bidder Circuit Breaker metrics
+		BidderCircuitState: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: namespace,
+				Name:      "bidder_circuit_breaker_state",
+				Help:      "Bidder circuit breaker state (0=closed, 1=open, 2=half-open)",
+			},
+			[]string{"bidder"},
+		),
+		BidderCircuitRequests: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "bidder_circuit_breaker_requests_total",
+				Help:      "Total requests through bidder circuit breaker",
+			},
+			[]string{"bidder"},
+		),
+		BidderCircuitFailures: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "bidder_circuit_breaker_failures_total",
+				Help:      "Total failures recorded by bidder circuit breaker",
+			},
+			[]string{"bidder"},
+		),
+		BidderCircuitSuccesses: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "bidder_circuit_breaker_successes_total",
+				Help:      "Total successes recorded by bidder circuit breaker",
+			},
+			[]string{"bidder"},
+		),
+		BidderCircuitRejected: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "bidder_circuit_breaker_rejected_total",
+				Help:      "Total requests rejected by bidder circuit breaker (circuit open)",
+			},
+			[]string{"bidder"},
+		),
+		BidderCircuitStateChanges: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "bidder_circuit_breaker_state_changes_total",
+				Help:      "Total circuit breaker state changes",
+			},
+			[]string{"bidder", "from_state", "to_state"},
+		),
+
 		// IDR metrics
 		IDRRequests: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -301,6 +359,12 @@ func NewMetrics(namespace string) *Metrics {
 		m.BidderLatency,
 		m.BidderErrors,
 		m.BidderTimeouts,
+		m.BidderCircuitState,
+		m.BidderCircuitRequests,
+		m.BidderCircuitFailures,
+		m.BidderCircuitSuccesses,
+		m.BidderCircuitRejected,
+		m.BidderCircuitStateChanges,
 		m.IDRRequests,
 		m.IDRLatency,
 		m.IDRCircuitState,
@@ -451,4 +515,43 @@ func (m *Metrics) RecordMargin(publisher, bidder, mediaType string, originalPric
 // RecordFloorAdjustment records when a floor price is adjusted via multiplier
 func (m *Metrics) RecordFloorAdjustment(publisher string) {
 	m.FloorAdjustments.WithLabelValues(publisher).Inc()
+}
+
+// SetBidderCircuitState sets the circuit breaker state for a bidder
+func (m *Metrics) SetBidderCircuitState(bidder, state string) {
+	var value float64
+	switch state {
+	case "closed":
+		value = 0
+	case "open":
+		value = 1
+	case "half-open":
+		value = 2
+	}
+	m.BidderCircuitState.WithLabelValues(bidder).Set(value)
+}
+
+// RecordBidderCircuitRequest records a request through the circuit breaker
+func (m *Metrics) RecordBidderCircuitRequest(bidder string) {
+	m.BidderCircuitRequests.WithLabelValues(bidder).Inc()
+}
+
+// RecordBidderCircuitFailure records a failure in the circuit breaker
+func (m *Metrics) RecordBidderCircuitFailure(bidder string) {
+	m.BidderCircuitFailures.WithLabelValues(bidder).Inc()
+}
+
+// RecordBidderCircuitSuccess records a success in the circuit breaker
+func (m *Metrics) RecordBidderCircuitSuccess(bidder string) {
+	m.BidderCircuitSuccesses.WithLabelValues(bidder).Inc()
+}
+
+// RecordBidderCircuitRejected records a request rejected by the circuit breaker
+func (m *Metrics) RecordBidderCircuitRejected(bidder string) {
+	m.BidderCircuitRejected.WithLabelValues(bidder).Inc()
+}
+
+// RecordBidderCircuitStateChange records a state change in the circuit breaker
+func (m *Metrics) RecordBidderCircuitStateChange(bidder, fromState, toState string) {
+	m.BidderCircuitStateChanges.WithLabelValues(bidder, fromState, toState).Inc()
 }
