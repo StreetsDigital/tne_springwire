@@ -10,7 +10,9 @@ import (
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/fpd"
+	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
+	"github.com/thenexusengine/tne_springwire/internal/storage"
 )
 
 // mockAdapter implements adapters.Adapter for testing
@@ -1982,3 +1984,95 @@ func BenchmarkSelectiveClone(b *testing.B) {
 		ex.cloneRequestWithFPD(req, "bidder1", nil)
 	}
 }
+
+func TestExchange_buildImpFloorMap_WithMultiplier(t *testing.T) {
+	ex := &Exchange{
+		metrics: &mockMetrics{},
+	}
+
+	// Create a publisher with bid multiplier
+	pub := &storage.Publisher{
+		ID:            "pub123",
+		BidMultiplier: 1.5,
+	}
+	ctx := middleware.NewContextWithPublisher(context.Background(), pub)
+
+	req := &openrtb.BidRequest{
+		Imp: []openrtb.Imp{
+			{ID: "imp1", BidFloor: 2.00},
+			{ID: "imp2", BidFloor: 1.50},
+			{ID: "imp3", BidFloor: 0}, // No floor
+		},
+	}
+
+	floors := ex.buildImpFloorMap(ctx, req)
+
+	// With 1.5x multiplier:
+	// imp1: 2.00 * 1.5 = 3.00
+	// imp2: 1.50 * 1.5 = 2.25
+	// imp3: 0 (no adjustment for zero floor)
+	if floors["imp1"] != 3.00 {
+		t.Errorf("expected imp1 floor 3.00 (2.00 * 1.5), got %f", floors["imp1"])
+	}
+	if floors["imp2"] != 2.25 {
+		t.Errorf("expected imp2 floor 2.25 (1.50 * 1.5), got %f", floors["imp2"])
+	}
+	if floors["imp3"] != 0 {
+		t.Errorf("expected imp3 floor 0 (no floor to adjust), got %f", floors["imp3"])
+	}
+}
+
+func TestExchange_buildImpFloorMap_InvalidMultiplier(t *testing.T) {
+	ex := &Exchange{}
+
+	// Publisher with invalid multiplier (> 10.0)
+	pub := &storage.Publisher{
+		ID:            "pub123",
+		BidMultiplier: 15.0, // Invalid, should be ignored
+	}
+	ctx := middleware.NewContextWithPublisher(context.Background(), pub)
+
+	req := &openrtb.BidRequest{
+		Imp: []openrtb.Imp{
+			{ID: "imp1", BidFloor: 2.00},
+		},
+	}
+
+	floors := ex.buildImpFloorMap(ctx, req)
+
+	// Should use base floor without multiplier
+	if floors["imp1"] != 2.00 {
+		t.Errorf("expected imp1 floor 2.00 (no multiplier applied), got %f", floors["imp1"])
+	}
+}
+
+func TestExchange_buildImpFloorMap_NoPublisherContext(t *testing.T) {
+	ex := &Exchange{}
+
+	req := &openrtb.BidRequest{
+		Imp: []openrtb.Imp{
+			{ID: "imp1", BidFloor: 2.00},
+		},
+	}
+
+	// No publisher in context
+	floors := ex.buildImpFloorMap(context.Background(), req)
+
+	// Should use base floor
+	if floors["imp1"] != 2.00 {
+		t.Errorf("expected imp1 floor 2.00, got %f", floors["imp1"])
+	}
+}
+
+// mockMetrics for testing
+type mockMetrics struct{}
+
+func (m *mockMetrics) RecordMargin(publisher, bidder, mediaType string, originalPrice, adjustedPrice, platformCut float64) {
+}
+func (m *mockMetrics) RecordFloorAdjustment(publisher string) {}
+func (m *mockMetrics) SetBidderCircuitState(bidder, state string) {}
+func (m *mockMetrics) RecordBidderCircuitRequest(bidder string)   {}
+func (m *mockMetrics) RecordBidderCircuitFailure(bidder string)   {}
+func (m *mockMetrics) RecordBidderCircuitSuccess(bidder string)   {}
+func (m *mockMetrics) RecordBidderCircuitRejected(bidder string)  {}
+func (m *mockMetrics) RecordBidderCircuitStateChange(bidder, fromState, toState string) {}

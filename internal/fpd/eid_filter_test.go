@@ -305,3 +305,76 @@ func TestParseEIDSources(t *testing.T) {
 		}
 	}
 }
+
+func TestEIDFilter_FilterUserEIDs_NilUser(t *testing.T) {
+	filter := NewEIDFilter(&Config{
+		EIDsEnabled: true,
+	})
+
+	// Should not panic with nil user
+	filter.FilterUserEIDs(nil)
+}
+
+func TestEIDFilter_FilterUserEIDs_Disabled(t *testing.T) {
+	filter := NewEIDFilter(&Config{
+		EIDsEnabled: false,
+	})
+
+	user := &openrtb.User{
+		ID: "user123",
+		EIDs: []openrtb.EID{
+			{Source: "example.com", UIDs: []openrtb.UID{{ID: "uid1"}}},
+		},
+	}
+
+	originalLen := len(user.EIDs)
+	filter.FilterUserEIDs(user)
+
+	// Should not filter when disabled
+	if len(user.EIDs) != originalLen {
+		t.Errorf("Expected EIDs unchanged when disabled, got %d, want %d", len(user.EIDs), originalLen)
+	}
+}
+
+func TestEIDFilter_isSourceAllowed_AllowAll(t *testing.T) {
+	filter := &EIDFilter{
+		enabled:  true,
+		allowAll: true,
+	}
+
+	if !filter.isSourceAllowed("any-source.com") {
+		t.Error("Expected all sources to be allowed when allowAll is true")
+	}
+}
+
+func TestEIDFilter_isSourceAllowed_Whitelist(t *testing.T) {
+	filter := &EIDFilter{
+		enabled:  true,
+		allowAll: false,
+		allowedSources: map[string]bool{
+			"trusted.com": true,
+			"allowed.net": true,
+		},
+	}
+
+	tests := []struct {
+		source   string
+		expected bool
+	}{
+		{"trusted.com", true},
+		{"TRUSTED.COM", true}, // Case insensitive
+		{" trusted.com ", true}, // Trimmed
+		{"allowed.net", true},
+		{"untrusted.com", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.source, func(t *testing.T) {
+			result := filter.isSourceAllowed(tt.source)
+			if result != tt.expected {
+				t.Errorf("isSourceAllowed(%q) = %v, want %v", tt.source, result, tt.expected)
+			}
+		})
+	}
+}

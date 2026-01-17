@@ -345,3 +345,32 @@ func TestUpdateConfig(t *testing.T) {
 		t.Error("expected global enabled to be true")
 	}
 }
+
+func TestProcessor_GetConfig_NilConfig(t *testing.T) {
+	p := &Processor{}
+	// Don't set config, so Load will return nil
+
+	cfg := p.GetConfig()
+	if cfg == nil {
+		t.Error("Expected empty config, got nil")
+	}
+}
+
+func TestProcessor_GetConfig_Valid(t *testing.T) {
+	expected := &Config{
+		Enabled:       true,
+		GlobalEnabled: true,
+	}
+	p := NewProcessor(expected)
+
+	cfg := p.GetConfig()
+	if cfg == nil {
+		t.Fatal("Expected config, got nil")
+	}
+	if !cfg.Enabled {
+		t.Error("Expected Enabled to be true")
+	}
+	if !cfg.GlobalEnabled {
+		t.Error("Expected GlobalEnabled to be true")
+	}
+}
