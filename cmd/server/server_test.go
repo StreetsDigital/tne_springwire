@@ -871,3 +871,187 @@ func TestResponseWriter_WriteMultiple(t *testing.T) {
 		t.Errorf("Expected final status 500, got %d", rw.statusCode)
 	}
 }
+
+func TestServer_AllComponents(t *testing.T) {
+	if testServer == nil {
+		t.Skip("Test server not initialized")
+	}
+
+	// Verify all major components are initialized
+	if testServer.config == nil {
+		t.Error("Expected config to be initialized")
+	}
+
+	if testServer.httpServer == nil {
+		t.Error("Expected HTTP server to be initialized")
+	}
+
+	if testServer.metrics == nil {
+		t.Error("Expected metrics to be initialized")
+	}
+
+	if testServer.exchange == nil {
+		t.Error("Expected exchange to be initialized")
+	}
+
+	if testServer.rateLimiter == nil {
+		t.Error("Expected rate limiter to be initialized")
+	}
+
+	// Verify HTTP server configuration
+	if testServer.httpServer.Addr != ":8080" {
+		t.Errorf("Expected server address ':8080', got '%s'", testServer.httpServer.Addr)
+	}
+}
+
+func TestHealthHandler_Consistency(t *testing.T) {
+	handler := healthHandler()
+
+	// Test that handler returns consistent results
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest("GET", "/health", nil)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("Iteration %d: Expected status 200, got %d", i, rr.Code)
+		}
+
+		var response map[string]interface{}
+		if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+			t.Fatalf("Iteration %d: Failed to decode: %v", i, err)
+		}
+
+		if response["status"] != "healthy" {
+			t.Errorf("Iteration %d: Expected healthy status", i)
+		}
+	}
+}
+
+func TestLoggingMiddleware_LargeRequest(t *testing.T) {
+	handler := loggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate processing time
+		time.Sleep(50 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Processed"))
+	}))
+
+	req := httptest.NewRequest("POST", "/api/large", nil)
+	rr := httptest.NewRecorder()
+
+	start := time.Now()
+	handler.ServeHTTP(rr, req)
+	duration := time.Since(start)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+
+	// Should take at least the sleep duration
+	if duration < 50*time.Millisecond {
+		t.Errorf("Expected duration >= 50ms, got %v", duration)
+	}
+
+	// Should have request ID
+	if rr.Header().Get("X-Request-ID") == "" {
+		t.Error("Expected X-Request-ID header")
+	}
+}
+
+func TestGenerateRequestID_Concurrent(t *testing.T) {
+	// Test concurrent request ID generation
+	ids := make(chan string, 100)
+	done := make(chan bool)
+
+	// Generate IDs concurrently
+	for i := 0; i < 100; i++ {
+		go func() {
+			ids <- generateRequestID()
+		}()
+	}
+
+	// Collect IDs
+	go func() {
+		idMap := make(map[string]bool)
+		for i := 0; i < 100; i++ {
+			id := <-ids
+			if idMap[id] {
+				t.Errorf("Duplicate ID generated in concurrent test: %s", id)
+			}
+			idMap[id] = true
+		}
+		done <- true
+	}()
+
+	// Wait for completion
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("Timeout waiting for concurrent ID generation")
+	}
+}
+
+func TestReadyHandler_JSONFormat(t *testing.T) {
+	if testServer == nil {
+		t.Skip("Test server not initialized")
+	}
+
+	handler := readyHandler(nil, testServer.exchange)
+
+	req := httptest.NewRequest("GET", "/health/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	// Check Content-Type
+	contentType := rr.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Expected Content-Type 'application/json', got '%s'", contentType)
+	}
+
+	// Verify it's valid JSON
+	var response map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("Invalid JSON response: %v", err)
+	}
+
+	// Check required fields
+	if _, ok := response["ready"]; !ok {
+		t.Error("Expected 'ready' field in response")
+	}
+
+	if _, ok := response["timestamp"]; !ok {
+		t.Error("Expected 'timestamp' field in response")
+	}
+
+	if _, ok := response["checks"]; !ok {
+		t.Error("Expected 'checks' field in response")
+	}
+}
+
+func TestServer_ConfigValues(t *testing.T) {
+	if testServer == nil {
+		t.Skip("Test server not initialized")
+	}
+
+	cfg := testServer.config
+
+	// Verify config values match what was set in TestNewServer_MinimalConfig
+	if cfg.Port != "8080" {
+		t.Errorf("Expected port 8080, got %s", cfg.Port)
+	}
+
+	if cfg.Timeout != 1000*time.Millisecond {
+		t.Errorf("Expected timeout 1s, got %v", cfg.Timeout)
+	}
+
+	if cfg.IDREnabled {
+		t.Error("Expected IDR to be disabled")
+	}
+
+	if cfg.HostURL != "https://example.com" {
+		t.Errorf("Expected host URL, got %s", cfg.HostURL)
+	}
+}
