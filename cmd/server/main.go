@@ -24,8 +24,10 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/metrics"
 	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/internal/storage"
+	"github.com/thenexusengine/tne_springwire/pkg/alerting"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 	"github.com/thenexusengine/tne_springwire/pkg/redis"
+	"github.com/thenexusengine/tne_springwire/pkg/sentry"
 )
 
 func main() {
@@ -47,9 +49,49 @@ func main() {
 		Dur("timeout", *timeout).
 		Msg("Starting The Nexus Engine PBS Server")
 
+	// Initialize Sentry error tracking (if configured)
+	sentryConfig := sentry.DefaultConfig()
+	if err := sentry.Init(sentryConfig); err != nil {
+		log.Warn().Err(err).Msg("Failed to initialize Sentry")
+	} else if sentry.IsEnabled() {
+		log.Info().
+			Str("environment", sentryConfig.Environment).
+			Str("release", sentryConfig.Release).
+			Msg("Sentry error tracking enabled")
+		// Ensure Sentry flushes on exit
+		defer sentry.Flush(2 * time.Second)
+	} else {
+		log.Info().Msg("Sentry disabled (SENTRY_DSN not set)")
+	}
+
+	// Initialize alerting manager (if configured)
+	alertConfig := alerting.DefaultConfig()
+	alertManager := alerting.NewManager(alertConfig)
+	if alertManager.IsEnabled() {
+		log.Info().
+			Str("service", alertConfig.ServiceName).
+			Str("environment", alertConfig.Environment).
+			Int("webhooks", len(alertConfig.Webhooks)).
+			Msg("Alerting webhooks enabled")
+	} else {
+		log.Info().Msg("Alerting disabled (no webhook URLs configured)")
+	}
+
 	// Initialize Prometheus metrics
 	m := metrics.NewMetrics("pbs")
 	log.Info().Msg("Prometheus metrics enabled")
+
+	// Initialize threshold-based alerting (monitors metrics and sends alerts)
+	var thresholdMonitor *alerting.ThresholdMonitor
+	if alertManager.IsEnabled() {
+		thresholdConfig := alerting.DefaultThresholdConfig()
+		thresholdMonitor = alerting.NewThresholdMonitor(thresholdConfig, alertManager, m)
+		thresholdMonitor.Start()
+		log.Info().
+			Float64("error_rate_threshold", thresholdConfig.ErrorRateThreshold).
+			Float64("latency_threshold_ms", thresholdConfig.LatencyThresholdMs).
+			Msg("Threshold-based alerting enabled")
+	}
 
 	// Initialize PostgreSQL database connection
 	var db *storage.BidderStore
@@ -264,9 +306,10 @@ func main() {
 	mux.Handle("/admin/publishers", publisherAdminHandler)
 	mux.Handle("/admin/publishers/", publisherAdminHandler) // With trailing slash for IDs
 
-	// Build middleware chain: CORS -> Security -> Logging -> Size Limit -> Auth -> PublisherAuth -> Rate Limit -> Metrics -> Gzip -> Handler
+	// Build middleware chain: CORS -> Security -> Sentry -> Logging -> Size Limit -> Auth -> PublisherAuth -> Rate Limit -> Metrics -> Gzip -> Handler
 	// Note: CORS must be outermost to handle preflight OPTIONS requests
 	// Note: Security headers applied early to ensure all responses have them
+	// Note: Sentry captures panics and adds request context for error tracking
 	// Note: Auth handles API key auth for admin endpoints
 	// Note: PublisherAuth handles publisher validation for auction endpoints
 	// Note: Gzip is innermost so responses are compressed before being sent
@@ -278,6 +321,9 @@ func main() {
 	handler = auth.Middleware(handler)
 	handler = sizeLimiter.Middleware(handler)
 	handler = loggingMiddleware(handler)
+	if sentry.IsEnabled() {
+		handler = sentry.HTTPMiddleware(handler) // Capture panics and add request context
+	}
 	handler = security.Middleware(handler)
 	handler = cors.Middleware(handler)
 
@@ -307,6 +353,12 @@ func main() {
 
 	// Stop rate limiter cleanup goroutine
 	rateLimiter.Stop()
+
+	// Stop threshold monitor if running
+	if thresholdMonitor != nil {
+		thresholdMonitor.Stop()
+		log.Info().Msg("Threshold monitor stopped")
+	}
 
 	// Flush pending events from exchange
 	if err := ex.Close(); err != nil {

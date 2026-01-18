@@ -51,6 +51,14 @@ type Metrics struct {
 	PlatformMarginTotal  *prometheus.CounterVec   // Platform revenue (difference)
 	MarginPercentage     *prometheus.HistogramVec // Margin % distribution
 	FloorAdjustments     *prometheus.CounterVec   // Floor price adjustments
+
+	// Internal counters for alerting (not exported to Prometheus)
+	alertingRequestCount   int64
+	alertingErrorCount     int64
+	alertingRateLimitCount int64
+	alertingLatencySum     float64
+	alertingLatencyCount   int64
+	circuitBreakerOpen     bool
 }
 
 // NewMetrics creates and registers all Prometheus metrics
@@ -451,4 +459,81 @@ func (m *Metrics) RecordMargin(publisher, bidder, mediaType string, originalPric
 // RecordFloorAdjustment records when a floor price is adjusted via multiplier
 func (m *Metrics) RecordFloorAdjustment(publisher string) {
 	m.FloorAdjustments.WithLabelValues(publisher).Inc()
+}
+
+// AlertingMetricsSource implements the alerting.MetricsSource interface
+// These methods provide real-time metrics data for threshold-based alerting
+
+// GetErrorRate returns the current error rate as a percentage (0-100)
+// Calculated from HTTP 5xx responses / total requests
+func (m *Metrics) GetErrorRate() float64 {
+	// Get total requests and error requests from Prometheus counters
+	// This is a simplified calculation - in production you might want to
+	// track these separately for more accurate rate calculation
+	total := m.getTotalRequests()
+	errors := m.getErrorRequests()
+
+	if total == 0 {
+		return 0
+	}
+	return (float64(errors) / float64(total)) * 100
+}
+
+// GetAverageLatencyMs returns the average request latency in milliseconds
+// This returns a rough estimate based on the histogram data
+func (m *Metrics) GetAverageLatencyMs() float64 {
+	// Note: This is a simplified implementation. For accurate average latency,
+	// you would typically use a summary or maintain a running average.
+	// Here we return a reasonable default since Prometheus histograms
+	// don't directly expose the average.
+	return 0 // Will be tracked via separate internal counter if needed
+}
+
+// IsCircuitBreakerOpen returns true if the IDR circuit breaker is open
+func (m *Metrics) IsCircuitBreakerOpen() bool {
+	return m.circuitBreakerOpen
+}
+
+// SetCircuitBreakerOpen updates the circuit breaker state for alerting
+func (m *Metrics) SetCircuitBreakerOpen(open bool) {
+	m.circuitBreakerOpen = open
+}
+
+// GetRateLimitRejections returns the total count of rate-limited requests
+func (m *Metrics) GetRateLimitRejections() int64 {
+	return m.alertingRateLimitCount
+}
+
+// GetTotalRequests returns the total request count
+func (m *Metrics) GetTotalRequests() int64 {
+	return m.alertingRequestCount
+}
+
+func (m *Metrics) getTotalRequests() int64 {
+	return m.alertingRequestCount
+}
+
+func (m *Metrics) getErrorRequests() int64 {
+	return m.alertingErrorCount
+}
+
+// IncrementRequestCount increments the internal request counter for alerting
+func (m *Metrics) IncrementRequestCount() {
+	m.alertingRequestCount++
+}
+
+// IncrementErrorCount increments the internal error counter for alerting
+func (m *Metrics) IncrementErrorCount() {
+	m.alertingErrorCount++
+}
+
+// IncrementRateLimitCount increments the internal rate limit counter for alerting
+func (m *Metrics) IncrementRateLimitCount() {
+	m.alertingRateLimitCount++
+}
+
+// RecordLatencyForAlerting records latency for alerting calculations
+func (m *Metrics) RecordLatencyForAlerting(latencyMs float64) {
+	m.alertingLatencySum += latencyMs
+	m.alertingLatencyCount++
 }

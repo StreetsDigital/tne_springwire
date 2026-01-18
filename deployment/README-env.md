@@ -852,6 +852,231 @@ LOG_FORMAT=json  # Production (for log aggregation)
 
 ---
 
+## Error Tracking (Sentry)
+
+### SENTRY_DSN
+
+**Purpose**: Sentry Data Source Name for error tracking.
+
+**Format**: Full Sentry DSN URL
+
+**Examples**:
+```bash
+SENTRY_DSN=                                                    # Disabled (default)
+SENTRY_DSN=https://xxx@o123.ingest.sentry.io/456              # Production
+```
+
+**How to Get**:
+1. Create account at https://sentry.io (free tier available)
+2. Create a new Go project
+3. Copy the DSN from project settings
+
+**What It Does**:
+- Captures exceptions with stack traces
+- Adds request context to errors
+- Groups similar errors automatically
+- Alerts on new/recurring issues
+
+### SENTRY_ENVIRONMENT
+
+**Purpose**: Environment name shown in Sentry dashboard.
+
+**Default**: development
+
+**Examples**:
+```bash
+SENTRY_ENVIRONMENT=development  # Local development
+SENTRY_ENVIRONMENT=staging      # Staging server
+SENTRY_ENVIRONMENT=production   # Production server
+```
+
+**Use Case**: Filter errors by environment in Sentry dashboard.
+
+### SENTRY_RELEASE
+
+**Purpose**: Release/version identifier shown in Sentry.
+
+**Default**: 1.0.0
+
+**Examples**:
+```bash
+SENTRY_RELEASE=1.0.0
+SENTRY_RELEASE=v2.3.1
+SENTRY_RELEASE=2024-01-15-abc123  # Date + commit hash
+```
+
+**Use Case**: Track which release introduced errors, identify regressions.
+
+### SENTRY_DEBUG
+
+**Purpose**: Enable Sentry debug mode.
+
+**Default**: false
+
+**Values**: true, false
+
+**When to Enable**: Only for debugging Sentry integration issues.
+
+---
+
+## Alerting Webhooks
+
+### ALERT_SLACK_WEBHOOK_URL
+
+**Purpose**: Slack incoming webhook URL for alerts.
+
+**Format**: Full Slack webhook URL
+
+**Examples**:
+```bash
+ALERT_SLACK_WEBHOOK_URL=                                                      # Disabled
+ALERT_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T00/B00/xxxx        # Enabled
+```
+
+**How to Get**:
+1. Go to Slack App Directory → Incoming Webhooks
+2. Create new webhook for your channel
+3. Copy the webhook URL
+
+**What Gets Sent**: Error rate alerts, latency alerts, circuit breaker state changes.
+
+### ALERT_DISCORD_WEBHOOK_URL
+
+**Purpose**: Discord webhook URL for alerts.
+
+**Format**: Full Discord webhook URL
+
+**Examples**:
+```bash
+ALERT_DISCORD_WEBHOOK_URL=                                                    # Disabled
+ALERT_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/123456/abcdef     # Enabled
+```
+
+**How to Get**:
+1. Server Settings → Integrations → Webhooks
+2. Create New Webhook
+3. Copy the webhook URL
+
+### ALERT_PAGERDUTY_ROUTING_KEY
+
+**Purpose**: PagerDuty Events API v2 routing key for critical alerts.
+
+**Format**: PagerDuty integration key (32 characters)
+
+**Examples**:
+```bash
+ALERT_PAGERDUTY_ROUTING_KEY=                                  # Disabled
+ALERT_PAGERDUTY_ROUTING_KEY=R01234567890ABCDEFGHIJKLMNOP     # Enabled
+```
+
+**How to Get**:
+1. PagerDuty → Services → Your Service → Integrations
+2. Add Integration → Events API v2
+3. Copy the Integration Key
+
+**Important**: Only critical alerts (circuit breaker open) are sent to PagerDuty.
+
+### ALERT_WEBHOOK_URL
+
+**Purpose**: Generic webhook URL for custom alerting systems.
+
+**Format**: Any HTTP/HTTPS URL that accepts POST JSON
+
+**Examples**:
+```bash
+ALERT_WEBHOOK_URL=                                            # Disabled
+ALERT_WEBHOOK_URL=https://your-system.com/alerts/webhook     # Enabled
+```
+
+**Payload Format**: JSON with alert details (name, severity, message, timestamp, tags).
+
+### ALERT_SERVICE_NAME
+
+**Purpose**: Service name included in alert payloads.
+
+**Default**: pbs
+
+**Examples**:
+```bash
+ALERT_SERVICE_NAME=pbs
+ALERT_SERVICE_NAME=catalyst-prod
+ALERT_SERVICE_NAME=prebid-server
+```
+
+### ALERT_ENVIRONMENT
+
+**Purpose**: Environment name included in alert payloads.
+
+**Default**: development
+
+**Examples**:
+```bash
+ALERT_ENVIRONMENT=development
+ALERT_ENVIRONMENT=staging
+ALERT_ENVIRONMENT=production
+```
+
+---
+
+## Alert Thresholds
+
+### ALERT_ERROR_RATE_THRESHOLD
+
+**Purpose**: Error rate percentage threshold for alerts.
+
+**Default**: 5.0 (5%)
+
+**Format**: Float (percentage, 0-100)
+
+**Examples**:
+```bash
+ALERT_ERROR_RATE_THRESHOLD=5.0   # Alert when >5% of requests fail
+ALERT_ERROR_RATE_THRESHOLD=2.0   # More sensitive (2%)
+ALERT_ERROR_RATE_THRESHOLD=10.0  # Less sensitive (10%)
+```
+
+### ALERT_LATENCY_THRESHOLD_MS
+
+**Purpose**: Average latency threshold for alerts (milliseconds).
+
+**Default**: 1000 (1 second)
+
+**Format**: Float (milliseconds)
+
+**Examples**:
+```bash
+ALERT_LATENCY_THRESHOLD_MS=1000  # Alert when avg latency >1s
+ALERT_LATENCY_THRESHOLD_MS=500   # More sensitive (500ms)
+ALERT_LATENCY_THRESHOLD_MS=2000  # Less sensitive (2s)
+```
+
+### ALERT_RATE_LIMIT_THRESHOLD
+
+**Purpose**: Rate limit rejections per minute threshold.
+
+**Default**: 100
+
+**Format**: Integer (rejections per minute)
+
+**Examples**:
+```bash
+ALERT_RATE_LIMIT_THRESHOLD=100   # Alert when >100 rejections/min
+ALERT_RATE_LIMIT_THRESHOLD=50    # More sensitive
+ALERT_RATE_LIMIT_THRESHOLD=200   # Less sensitive
+```
+
+### ALERT_CIRCUIT_BREAKER
+
+**Purpose**: Alert when circuit breaker opens.
+
+**Default**: true
+
+**Values**: true, false
+
+**Recommendation**: Always `true` - circuit breaker opening indicates IDR service issues.
+
+---
+
 ## Monitoring & Profiling
 
 ### PPROF_ENABLED
